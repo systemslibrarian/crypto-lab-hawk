@@ -98,6 +98,8 @@ const state: {
   pendingFocusSelector: null,
 };
 
+const schemeOrder: SchemeKey[] = ['falcon', 'mldsa', 'hawk'];
+
 function setTheme(theme: 'dark' | 'light'): void {
   state.theme = theme;
   document.documentElement.setAttribute('data-theme', theme);
@@ -117,6 +119,13 @@ function setStatusMessage(message: string | null): void {
 
 function setPendingFocus(selector: string | null): void {
   state.pendingFocusSelector = selector;
+}
+
+function selectScheme(scheme: SchemeKey, focusSelector: string | null = null): void {
+  state.selectedScheme = scheme;
+  setLiveMessage(`${schemeCopy[scheme].title} details selected.`);
+  setPendingFocus(focusSelector);
+  render();
 }
 
 function formatMs(value: number): string {
@@ -313,8 +322,8 @@ function render(): void {
           <h2 id="exhibit-one-title">The Three Lattice Signatures</h2>
           <p>Click a scheme to inspect the engineering tradeoff that dominates its deployment story.</p>
         </div>
-        <div class="scheme-grid" role="group" aria-label="Signature scheme comparison cards">
-          <button class="scheme-card accent-amber ${state.selectedScheme === 'falcon' ? 'active' : ''}" type="button" data-scheme="falcon" aria-pressed="${state.selectedScheme === 'falcon'}" aria-describedby="scheme-detail-panel">
+        <div class="scheme-grid" role="radiogroup" aria-label="Signature scheme comparison cards">
+          <button class="scheme-card accent-amber ${state.selectedScheme === 'falcon' ? 'active' : ''}" type="button" role="radio" tabindex="${state.selectedScheme === 'falcon' ? '0' : '-1'}" data-scheme="falcon" aria-checked="${state.selectedScheme === 'falcon'}" aria-describedby="scheme-detail-panel">
             <h3>Falcon</h3>
             <p>Small signatures, difficult floating-point hardening.</p>
             <ul>
@@ -323,7 +332,7 @@ function render(): void {
               <li>FIPS 206 in progress</li>
             </ul>
           </button>
-          <button class="scheme-card accent-magenta ${state.selectedScheme === 'mldsa' ? 'active' : ''}" type="button" data-scheme="mldsa" aria-pressed="${state.selectedScheme === 'mldsa'}" aria-describedby="scheme-detail-panel">
+          <button class="scheme-card accent-magenta ${state.selectedScheme === 'mldsa' ? 'active' : ''}" type="button" role="radio" tabindex="${state.selectedScheme === 'mldsa' ? '0' : '-1'}" data-scheme="mldsa" aria-checked="${state.selectedScheme === 'mldsa'}" aria-describedby="scheme-detail-panel">
             <h3>ML-DSA</h3>
             <p>Standardized and integer-only, but rejection loops complicate timing.</p>
             <ul>
@@ -332,7 +341,7 @@ function render(): void {
               <li>FIPS 204 today</li>
             </ul>
           </button>
-          <button class="scheme-card accent-cyan ${state.selectedScheme === 'hawk' ? 'active' : ''}" type="button" data-scheme="hawk" aria-pressed="${state.selectedScheme === 'hawk'}" aria-describedby="scheme-detail-panel">
+          <button class="scheme-card accent-cyan ${state.selectedScheme === 'hawk' ? 'active' : ''}" type="button" role="radio" tabindex="${state.selectedScheme === 'hawk' ? '0' : '-1'}" data-scheme="hawk" aria-checked="${state.selectedScheme === 'hawk'}" aria-describedby="scheme-detail-panel">
             <h3>HAWK</h3>
             <p>Integer-only Gaussian sampling over Z with no rejection loop.</p>
             <ul>
@@ -564,10 +573,40 @@ async function runSigningDemo(): Promise<void> {
 function bindEvents(): void {
   document.querySelectorAll<HTMLButtonElement>('[data-scheme]').forEach((button) => {
     button.addEventListener('click', () => {
-      state.selectedScheme = button.dataset.scheme as SchemeKey;
-      setLiveMessage(`${schemeCopy[state.selectedScheme].title} details selected.`);
-      setPendingFocus('#scheme-detail-panel');
-      render();
+      selectScheme(button.dataset.scheme as SchemeKey, '[data-scheme][aria-checked="true"]');
+    });
+
+    button.addEventListener('keydown', (event) => {
+      const currentScheme = button.dataset.scheme as SchemeKey;
+      const currentIndex = schemeOrder.indexOf(currentScheme);
+
+      if (currentIndex === -1) {
+        return;
+      }
+
+      let nextIndex: number | null = null;
+
+      switch (event.key) {
+        case 'ArrowRight':
+        case 'ArrowDown':
+          nextIndex = (currentIndex + 1) % schemeOrder.length;
+          break;
+        case 'ArrowLeft':
+        case 'ArrowUp':
+          nextIndex = (currentIndex - 1 + schemeOrder.length) % schemeOrder.length;
+          break;
+        case 'Home':
+          nextIndex = 0;
+          break;
+        case 'End':
+          nextIndex = schemeOrder.length - 1;
+          break;
+        default:
+          return;
+      }
+
+      event.preventDefault();
+      selectScheme(schemeOrder[nextIndex], '[data-scheme][aria-checked="true"]');
     });
   });
 
