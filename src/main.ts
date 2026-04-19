@@ -84,6 +84,7 @@ const state: {
   theme: 'dark' | 'light';
   statusMessage: string | null;
   liveMessage: string;
+  pendingFocusSelector: string | null;
 } = {
   selectedScheme: 'hawk',
   gaussian: null,
@@ -94,6 +95,7 @@ const state: {
   theme: (document.documentElement.getAttribute('data-theme') as 'dark' | 'light' | null) ?? 'dark',
   statusMessage: null,
   liveMessage: 'HAWK demo loaded. Round 2 status notice: educational build only.',
+  pendingFocusSelector: null,
 };
 
 function setTheme(theme: 'dark' | 'light'): void {
@@ -111,6 +113,10 @@ function setStatusMessage(message: string | null): void {
   if (message) {
     setLiveMessage(message);
   }
+}
+
+function setPendingFocus(selector: string | null): void {
+  state.pendingFocusSelector = selector;
 }
 
 function formatMs(value: number): string {
@@ -460,12 +466,28 @@ no transcendental functions anywhere</pre>
   `;
 
   bindEvents();
+  restorePendingFocus();
+}
+
+function restorePendingFocus(): void {
+  if (!state.pendingFocusSelector) {
+    return;
+  }
+
+  const selector = state.pendingFocusSelector;
+  state.pendingFocusSelector = null;
+
+  requestAnimationFrame(() => {
+    const target = document.querySelector<HTMLElement>(selector);
+    target?.focus();
+  });
 }
 
 async function runGaussianDemo(): Promise<void> {
   state.busyGaussian = true;
   setStatusMessage(null);
   setLiveMessage('Sampling the discrete Gaussian distribution for HAWK.');
+  setPendingFocus('[data-action="sample-gaussian"]');
   render();
 
   try {
@@ -493,9 +515,11 @@ async function runGaussianDemo(): Promise<void> {
       histogram,
     };
     setLiveMessage('Gaussian sampling complete. Updated histogram and timing comparison are available.');
+    setPendingFocus('.histogram-shell');
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Gaussian sampling failed.';
     setStatusMessage(message);
+    setPendingFocus('.status-banner');
   } finally {
     state.busyGaussian = false;
     render();
@@ -506,6 +530,7 @@ async function runSigningDemo(): Promise<void> {
   state.busySigning = true;
   setStatusMessage(null);
   setLiveMessage('Generating a HAWK keypair and signing the current message.');
+  setPendingFocus('[data-action="run-signing"]');
   render();
 
   try {
@@ -525,9 +550,11 @@ async function runSigningDemo(): Promise<void> {
       benchmark,
     };
     setLiveMessage(`Signing complete. Verification ${verified ? 'passed' : 'failed'}.`);
+    setPendingFocus('.signing-log');
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Signing failed.';
     setStatusMessage(message);
+    setPendingFocus('.status-banner');
   } finally {
     state.busySigning = false;
     render();
@@ -539,6 +566,7 @@ function bindEvents(): void {
     button.addEventListener('click', () => {
       state.selectedScheme = button.dataset.scheme as SchemeKey;
       setLiveMessage(`${schemeCopy[state.selectedScheme].title} details selected.`);
+      setPendingFocus('#scheme-detail-panel');
       render();
     });
   });
@@ -547,6 +575,7 @@ function bindEvents(): void {
   themeToggle?.addEventListener('click', () => {
     setTheme(state.theme === 'dark' ? 'light' : 'dark');
     setLiveMessage(`Theme switched to ${state.theme} mode.`);
+    setPendingFocus('[data-action="theme-toggle"]');
     render();
   });
 
