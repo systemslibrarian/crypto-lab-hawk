@@ -6,11 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "verify:phase1": "tsx scripts/verify-phase1.ts",
     "preview": "vite preview"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",
     "typescript": "^5.8.3",
+    "tsx": "^4.19.4",
     "vite": "^7.0.0"
   }
 }
