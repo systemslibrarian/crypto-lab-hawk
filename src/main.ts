@@ -210,7 +210,7 @@ function gaussianMarkup(): string {
         <strong>${state.gaussian.variance.toFixed(4)}</strong>
       </article>
     </div>
-    <div class="histogram-shell" role="list" aria-label="Observed Gaussian histogram">
+    <div class="histogram-shell" role="list" aria-label="Observed Gaussian histogram" tabindex="-1">
       ${histogramBars(state.gaussian.histogram)}
     </div>
     <p class="mini-note">Observed support: ${state.gaussian.minObserved} to ${state.gaussian.maxObserved}. This demo keeps the sampling path integer-only and constant-shape by always walking the full table.</p>
@@ -245,7 +245,7 @@ function signingMarkup(): string {
         <strong>${state.signing.restartCount}</strong>
       </article>
     </div>
-    <div class="signing-log">
+    <div class="signing-log" tabindex="-1">
       <div>
         <span class="eyebrow">Salt</span>
         <p class="mono-block">${escapeHtml(state.signing.saltHex)}</p>
@@ -268,7 +268,7 @@ function statusMarkup(): string {
   }
 
   return `
-    <div class="status-banner" role="status" aria-live="polite">
+    <div class="status-banner" role="status" aria-live="polite" tabindex="-1">
       <strong>Notice:</strong> ${escapeHtml(state.statusMessage)}
     </div>
   `;
@@ -313,7 +313,7 @@ function render(): void {
           <h2 id="exhibit-one-title">The Three Lattice Signatures</h2>
           <p>Click a scheme to inspect the engineering tradeoff that dominates its deployment story.</p>
         </div>
-        <div class="scheme-grid" role="list" aria-label="Signature scheme comparison cards">
+        <div class="scheme-grid" role="group" aria-label="Signature scheme comparison cards">
           <button class="scheme-card accent-amber ${state.selectedScheme === 'falcon' ? 'active' : ''}" type="button" data-scheme="falcon" aria-pressed="${state.selectedScheme === 'falcon'}" aria-describedby="scheme-detail-panel">
             <h3>Falcon</h3>
             <p>Small signatures, difficult floating-point hardening.</p>
