@@ -82,6 +82,8 @@ const state: {
   busySigning: boolean;
   message: string;
   theme: 'dark' | 'light';
+  statusMessage: string | null;
+  liveMessage: string;
 } = {
   selectedScheme: 'hawk',
   gaussian: null,
@@ -90,12 +92,25 @@ const state: {
   busySigning: false,
   message: 'Release firmware v2.3.1 on 2026-04-19',
   theme: (document.documentElement.getAttribute('data-theme') as 'dark' | 'light' | null) ?? 'dark',
+  statusMessage: null,
+  liveMessage: 'HAWK demo loaded. Round 2 status notice: educational build only.',
 };
 
 function setTheme(theme: 'dark' | 'light'): void {
   state.theme = theme;
   document.documentElement.setAttribute('data-theme', theme);
   localStorage.setItem('theme', theme);
+}
+
+function setLiveMessage(message: string): void {
+  state.liveMessage = message;
+}
+
+function setStatusMessage(message: string | null): void {
+  state.statusMessage = message;
+  if (message) {
+    setLiveMessage(message);
+  }
 }
 
 function formatMs(value: number): string {
@@ -108,6 +123,15 @@ function formatRatio(value: number): string {
 
 function formatHex(bytes: Uint8Array): string {
   return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
 
 function previewPolynomial(values: Int32Array, width: number = 12): string {
@@ -125,9 +149,9 @@ function histogramBars(histogram: Array<[number, number]>): string {
     .map(([value, count]) => {
       const width = Math.max(4, Math.round((count / maxCount) * 100));
       return `
-        <div class="hist-row">
+        <div class="hist-row" role="listitem" aria-label="Histogram bucket ${value}, count ${count}">
           <span class="hist-label">${value >= 0 ? `+${value}` : value}</span>
-          <div class="hist-bar"><span style="width:${width}%"></span></div>
+          <div class="hist-bar" aria-hidden="true"><span style="width:${width}%"></span></div>
           <span class="hist-value">${count}</span>
         </div>
       `;
@@ -139,7 +163,7 @@ function schemeDetailMarkup(): string {
   const detail = schemeCopy[state.selectedScheme];
 
   return `
-    <article class="detail-panel accent-${detail.accent}">
+    <article class="detail-panel accent-${detail.accent}" id="scheme-detail-panel" tabindex="-1">
       <div class="detail-header">
         <span class="eyebrow">Deep Dive</span>
         <h3>${detail.title}</h3>
@@ -162,7 +186,7 @@ function gaussianMarkup(): string {
   }
 
   return `
-    <div class="stats-grid compact">
+    <div class="stats-grid compact" aria-label="Gaussian sampler statistics">
       <article class="metric-card accent-cyan">
         <span>HAWK sampler</span>
         <strong>${formatMs(state.gaussian.hawkSampleMs)}</strong>
@@ -180,7 +204,7 @@ function gaussianMarkup(): string {
         <strong>${state.gaussian.variance.toFixed(4)}</strong>
       </article>
     </div>
-    <div class="histogram-shell">
+    <div class="histogram-shell" role="list" aria-label="Observed Gaussian histogram">
       ${histogramBars(state.gaussian.histogram)}
     </div>
     <p class="mini-note">Observed support: ${state.gaussian.minObserved} to ${state.gaussian.maxObserved}. This demo keeps the sampling path integer-only and constant-shape by always walking the full table.</p>
@@ -197,7 +221,7 @@ function signingMarkup(): string {
   }
 
   return `
-    <div class="stats-grid">
+    <div class="stats-grid" aria-label="Signing statistics">
       <article class="metric-card accent-green">
         <span>Verification</span>
         <strong>${state.signing.verified ? 'PASS' : 'FAIL'}</strong>
@@ -218,11 +242,11 @@ function signingMarkup(): string {
     <div class="signing-log">
       <div>
         <span class="eyebrow">Salt</span>
-        <p class="mono-block">${state.signing.saltHex}</p>
+        <p class="mono-block">${escapeHtml(state.signing.saltHex)}</p>
       </div>
       <div>
         <span class="eyebrow">s1 preview</span>
-        <p class="mono-block">${state.signing.s1Preview}</p>
+        <p class="mono-block">${escapeHtml(state.signing.s1Preview)}</p>
       </div>
       <div>
         <span class="eyebrow">Benchmark</span>
@@ -232,16 +256,31 @@ function signingMarkup(): string {
   `;
 }
 
+function statusMarkup(): string {
+  if (!state.statusMessage) {
+    return '';
+  }
+
+  return `
+    <div class="status-banner" role="status" aria-live="polite">
+      <strong>Notice:</strong> ${escapeHtml(state.statusMessage)}
+    </div>
+  `;
+}
+
 function render(): void {
   appRoot.innerHTML = `
-    <main class="shell">
-      <section class="hero">
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <div class="sr-only" aria-live="polite" aria-atomic="true">${escapeHtml(state.liveMessage)}</div>
+    <main class="shell" id="main-content">
+      ${statusMarkup()}
+      <section class="hero" aria-labelledby="hero-title">
         <div class="hero-copy">
           <span class="hero-tag">HAWK signature laboratory</span>
-          <h1>Integer-only lattice signatures, built for the post-Falcon era.</h1>
+          <h1 id="hero-title">Integer-only lattice signatures, built for the post-Falcon era.</h1>
           <p class="lede">Browser-based educational demo of HAWK, the only lattice-based scheme still standing in Round 2 of NIST's additional PQ signature process as of April 2026.</p>
           <div class="hero-actions">
-            <button class="pill-button" data-action="theme-toggle">Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode</button>
+            <button class="pill-button" type="button" data-action="theme-toggle" aria-pressed="${state.theme === 'light'}" aria-label="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode">Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode</button>
             <span class="status-badge round-2">Round 2, not standardized</span>
             <span class="status-badge caution">Educational build only</span>
           </div>
@@ -262,14 +301,14 @@ function render(): void {
         </aside>
       </section>
 
-      <section class="exhibit">
+      <section class="exhibit" aria-labelledby="exhibit-one-title">
         <div class="section-heading">
           <span class="eyebrow">Exhibit 1</span>
-          <h2>The Three Lattice Signatures</h2>
+          <h2 id="exhibit-one-title">The Three Lattice Signatures</h2>
           <p>Click a scheme to inspect the engineering tradeoff that dominates its deployment story.</p>
         </div>
-        <div class="scheme-grid">
-          <button class="scheme-card accent-amber ${state.selectedScheme === 'falcon' ? 'active' : ''}" data-scheme="falcon">
+        <div class="scheme-grid" role="list" aria-label="Signature scheme comparison cards">
+          <button class="scheme-card accent-amber ${state.selectedScheme === 'falcon' ? 'active' : ''}" type="button" data-scheme="falcon" aria-pressed="${state.selectedScheme === 'falcon'}" aria-describedby="scheme-detail-panel">
             <h3>Falcon</h3>
             <p>Small signatures, difficult floating-point hardening.</p>
             <ul>
@@ -278,7 +317,7 @@ function render(): void {
               <li>FIPS 206 in progress</li>
             </ul>
           </button>
-          <button class="scheme-card accent-magenta ${state.selectedScheme === 'mldsa' ? 'active' : ''}" data-scheme="mldsa">
+          <button class="scheme-card accent-magenta ${state.selectedScheme === 'mldsa' ? 'active' : ''}" type="button" data-scheme="mldsa" aria-pressed="${state.selectedScheme === 'mldsa'}" aria-describedby="scheme-detail-panel">
             <h3>ML-DSA</h3>
             <p>Standardized and integer-only, but rejection loops complicate timing.</p>
             <ul>
@@ -287,7 +326,7 @@ function render(): void {
               <li>FIPS 204 today</li>
             </ul>
           </button>
-          <button class="scheme-card accent-cyan ${state.selectedScheme === 'hawk' ? 'active' : ''}" data-scheme="hawk">
+          <button class="scheme-card accent-cyan ${state.selectedScheme === 'hawk' ? 'active' : ''}" type="button" data-scheme="hawk" aria-pressed="${state.selectedScheme === 'hawk'}" aria-describedby="scheme-detail-panel">
             <h3>HAWK</h3>
             <p>Integer-only Gaussian sampling over Z with no rejection loop.</p>
             <ul>
@@ -314,10 +353,10 @@ function render(): void {
         ${schemeDetailMarkup()}
       </section>
 
-      <section class="exhibit">
+      <section class="exhibit" aria-labelledby="exhibit-two-title" aria-busy="${state.busyGaussian}">
         <div class="section-heading">
           <span class="eyebrow">Exhibit 2</span>
-          <h2>The Gaussian Sampling Difference</h2>
+          <h2 id="exhibit-two-title">The Gaussian Sampling Difference</h2>
           <p>HAWK samples over Z with fixed integer tables. Falcon samples over a lattice with floating-point machinery.</p>
         </div>
         <div class="two-column">
@@ -337,33 +376,33 @@ no transcendental functions anywhere</pre>
           </article>
         </div>
         <div class="panel-actions">
-          <button class="primary-button" data-action="sample-gaussian" ${state.busyGaussian ? 'disabled' : ''}>${state.busyGaussian ? 'Sampling...' : 'Sample Gaussian'}</button>
+          <button class="primary-button" type="button" data-action="sample-gaussian" ${state.busyGaussian ? 'disabled' : ''} aria-busy="${state.busyGaussian}">${state.busyGaussian ? 'Sampling...' : 'Sample Gaussian'}</button>
           <p class="mini-note">Target sigma in this educational build: approximately 1.425, matching the fixed-table story in HAWK v1.1.</p>
         </div>
         ${gaussianMarkup()}
       </section>
 
-      <section class="exhibit">
+      <section class="exhibit" aria-labelledby="exhibit-three-title" aria-busy="${state.busySigning}">
         <div class="section-heading">
           <span class="eyebrow">Exhibit 3</span>
-          <h2>HAWK Signing In Action</h2>
+          <h2 id="exhibit-three-title">HAWK Signing In Action</h2>
           <p>This educational implementation keeps the public-key consistency check exact while modeling the hidden Gaussian perturbation internally.</p>
         </div>
         <div class="sign-form">
           <label for="message-input">Message</label>
-          <textarea id="message-input" data-role="message-input" rows="3">${state.message}</textarea>
+          <textarea id="message-input" data-role="message-input" rows="3" aria-describedby="message-help">${escapeHtml(state.message)}</textarea>
           <div class="panel-actions">
-            <button class="primary-button" data-action="run-signing" ${state.busySigning ? 'disabled' : ''}>${state.busySigning ? 'Signing...' : 'Generate keypair and sign'}</button>
-            <span class="mini-note">Restart odds shown in the UI: about 1 in 200,000 for HAWK-512 and 1 in 400,000 for HAWK-1024.</span>
+            <button class="primary-button" type="button" data-action="run-signing" ${state.busySigning ? 'disabled' : ''} aria-busy="${state.busySigning}">${state.busySigning ? 'Signing...' : 'Generate keypair and sign'}</button>
+            <span class="mini-note" id="message-help">Restart odds shown in the UI: about 1 in 200,000 for HAWK-512 and 1 in 400,000 for HAWK-1024.</span>
           </div>
         </div>
         ${signingMarkup()}
       </section>
 
-      <section class="exhibit roadmap">
+      <section class="exhibit roadmap" aria-labelledby="exhibit-four-title">
         <div class="section-heading">
           <span class="eyebrow">Exhibit 4</span>
-          <h2>Standardization Roadmap</h2>
+          <h2 id="exhibit-four-title">Standardization Roadmap</h2>
           <p>HAWK is still speculative. The point of this lab is to understand the design frontier, not to imply deployment approval.</p>
         </div>
         <div class="timeline">
@@ -386,10 +425,10 @@ no transcendental functions anywhere</pre>
         </div>
       </section>
 
-      <section class="exhibit deployment">
+      <section class="exhibit deployment" aria-labelledby="exhibit-five-title">
         <div class="section-heading">
           <span class="eyebrow">Exhibit 5</span>
-          <h2>Why This Matters For Deployment</h2>
+          <h2 id="exhibit-five-title">Why This Matters For Deployment</h2>
           <p>HAWK is a roadmap item, not a production recommendation. Design for crypto agility now so you can adopt new signatures later.</p>
         </div>
         <div class="deployment-grid">
@@ -425,62 +464,81 @@ no transcendental functions anywhere</pre>
 
 async function runGaussianDemo(): Promise<void> {
   state.busyGaussian = true;
+  setStatusMessage(null);
+  setLiveMessage('Sampling the discrete Gaussian distribution for HAWK.');
   render();
 
-  const samples: number[] = [];
-  const startedAt = performance.now();
+  try {
+    const samples: number[] = [];
+    const startedAt = performance.now();
 
-  for (let index = 0; index < 4096; index += 1) {
-    samples.push(sampleDiscreteGaussian(DISCRETE_GAUSSIAN_TABLE_T1));
+    for (let index = 0; index < 4096; index += 1) {
+      samples.push(sampleDiscreteGaussian(DISCRETE_GAUSSIAN_TABLE_T1));
+    }
+
+    const hawkSampleMs = performance.now() - startedAt;
+    const stats = analyzeSampleDistribution(samples);
+    const falconSimulationMs = Math.max(15, hawkSampleMs * 120);
+    const histogram = Array.from(stats.histogram.entries())
+      .filter(([value]) => value >= -6 && value <= 6)
+      .sort((left, right) => left[0] - right[0]);
+
+    state.gaussian = {
+      mean: stats.mean,
+      variance: stats.variance,
+      minObserved: stats.minObserved,
+      maxObserved: stats.maxObserved,
+      hawkSampleMs,
+      falconSimulationMs,
+      histogram,
+    };
+    setLiveMessage('Gaussian sampling complete. Updated histogram and timing comparison are available.');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Gaussian sampling failed.';
+    setStatusMessage(message);
+  } finally {
+    state.busyGaussian = false;
+    render();
   }
-
-  const hawkSampleMs = performance.now() - startedAt;
-  const stats = analyzeSampleDistribution(samples);
-  const falconSimulationMs = Math.max(15, hawkSampleMs * 120);
-  const histogram = Array.from(stats.histogram.entries())
-    .filter(([value]) => value >= -6 && value <= 6)
-    .sort((left, right) => left[0] - right[0]);
-
-  state.gaussian = {
-    mean: stats.mean,
-    variance: stats.variance,
-    minObserved: stats.minObserved,
-    maxObserved: stats.maxObserved,
-    hawkSampleMs,
-    falconSimulationMs,
-    histogram,
-  };
-  state.busyGaussian = false;
-  render();
 }
 
 async function runSigningDemo(): Promise<void> {
   state.busySigning = true;
+  setStatusMessage(null);
+  setLiveMessage('Generating a HAWK keypair and signing the current message.');
   render();
 
-  const message = new TextEncoder().encode(state.message);
-  const { privateKey, publicKey, generationAttempts } = await hawkKeygen(HAWK_512_PARAMS);
-  const { signature, signingTimeMs, restartCount } = await hawkSign(message, privateKey);
-  const verified = await hawkVerify(message, signature, publicKey);
-  const benchmark = await benchmarkHAWK(8);
+  try {
+    const message = new TextEncoder().encode(state.message);
+    const { privateKey, publicKey, generationAttempts } = await hawkKeygen(HAWK_512_PARAMS);
+    const { signature, signingTimeMs, restartCount } = await hawkSign(message, privateKey);
+    const verified = await hawkVerify(message, signature, publicKey);
+    const benchmark = await benchmarkHAWK(8);
 
-  state.signing = {
-    generationAttempts,
-    restartCount,
-    signingTimeMs,
-    verified,
-    saltHex: formatHex(signature.salt),
-    s1Preview: previewPolynomial(signature.s1),
-    benchmark,
-  };
-  state.busySigning = false;
-  render();
+    state.signing = {
+      generationAttempts,
+      restartCount,
+      signingTimeMs,
+      verified,
+      saltHex: formatHex(signature.salt),
+      s1Preview: previewPolynomial(signature.s1),
+      benchmark,
+    };
+    setLiveMessage(`Signing complete. Verification ${verified ? 'passed' : 'failed'}.`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Signing failed.';
+    setStatusMessage(message);
+  } finally {
+    state.busySigning = false;
+    render();
+  }
 }
 
 function bindEvents(): void {
   document.querySelectorAll<HTMLButtonElement>('[data-scheme]').forEach((button) => {
     button.addEventListener('click', () => {
       state.selectedScheme = button.dataset.scheme as SchemeKey;
+      setLiveMessage(`${schemeCopy[state.selectedScheme].title} details selected.`);
       render();
     });
   });
@@ -488,6 +546,7 @@ function bindEvents(): void {
   const themeToggle = document.querySelector<HTMLButtonElement>('[data-action="theme-toggle"]');
   themeToggle?.addEventListener('click', () => {
     setTheme(state.theme === 'dark' ? 'light' : 'dark');
+    setLiveMessage(`Theme switched to ${state.theme} mode.`);
     render();
   });
 

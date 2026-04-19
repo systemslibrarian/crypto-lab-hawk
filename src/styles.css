@@ -53,14 +53,68 @@ textarea {
   font: inherit;
 }
 
+a {
+  color: inherit;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 3px;
+}
+
 #app {
   min-height: 100vh;
+}
+
+.skip-link,
+.sr-only {
+  position: absolute;
+}
+
+.skip-link {
+  top: 16px;
+  left: 16px;
+  z-index: 20;
+  padding: 12px 14px;
+  border-radius: 999px;
+  background: var(--panel-strong);
+  border: 1px solid var(--line);
+  transform: translateY(-160%);
+  transition: transform 160ms ease;
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+.sr-only {
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .shell {
   width: min(1200px, calc(100vw - 32px));
   margin: 0 auto;
   padding: 32px 0 72px;
+}
+
+.status-banner {
+  margin-bottom: 20px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 170, 0, 0.35);
+  background: rgba(255, 170, 0, 0.12);
 }
 
 .hero,
@@ -144,6 +198,7 @@ textarea {
 
 .pill-button,
 .primary-button {
+  min-height: 44px;
   padding: 12px 18px;
   border-radius: 999px;
   color: var(--text);
@@ -188,6 +243,12 @@ textarea {
   padding-left: 18px;
 }
 
+.hero-list li,
+.scheme-card li,
+.detail-list li {
+  line-height: 1.5;
+}
+
 blockquote {
   margin: 0;
   padding: 18px 20px;
@@ -225,6 +286,9 @@ blockquote footer {
 
 .scheme-card {
   text-align: left;
+  display: block;
+  width: 100%;
+  min-height: 100%;
   padding: 22px;
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.03);
@@ -297,6 +361,7 @@ blockquote footer {
 .mono-block {
   margin: 0;
   white-space: pre-wrap;
+  word-break: break-word;
   font-family: "IBM Plex Mono", "Cascadia Code", monospace;
   color: var(--text);
 }
@@ -357,12 +422,17 @@ blockquote footer {
 
 .sign-form textarea {
   width: 100%;
+  min-height: 120px;
   padding: 16px 18px;
   resize: vertical;
   border-radius: 18px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
+}
+
+.sign-form textarea::placeholder {
+  color: var(--muted);
 }
 
 .signing-log {
@@ -396,6 +466,7 @@ blockquote footer {
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.04);
   font-size: 0.88rem;
+  overflow-wrap: anywhere;
 }
 
 .accent-cyan {
@@ -435,6 +506,10 @@ blockquote footer {
   .stats-grid {
     grid-template-columns: 1fr 1fr;
   }
+
+  .hero {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {
@@ -458,11 +533,42 @@ blockquote footer {
     border-radius: 22px;
   }
 
+  .hero-actions,
+  .panel-actions,
+  .comparison-strip,
+  .cross-links {
+    align-items: stretch;
+  }
+
+  .pill-button,
+  .primary-button,
+  .status-badge,
+  .cross-links span {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .comparison-strip article,
+  .timeline article,
+  .advice-card,
+  .metric-card,
+  .flow-card,
+  .detail-panel,
+  .status-card,
+  .signing-log,
+  .histogram-shell {
+    padding: 16px;
+  }
+
   .hero h1 {
     max-width: none;
   }
 
   .hist-row {
     grid-template-columns: 42px 1fr 54px;
+  }
+
+  .section-heading h2 {
+    line-height: 1.05;
   }
 }
