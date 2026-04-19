@@ -148,7 +148,7 @@ export function polyNormSquared(p: Polynomial): number {
 /**
  * Random small polynomial with coefficients in {-1, 0, 1}
  * via rejection sampling of byte values.
- * No Math.random — uses crypto.getRandomValues.
+ * No non-cryptographic RNG is used here; randomness comes from crypto.getRandomValues.
  */
 export function randomSmallPolynomial(n: number): Polynomial {
   assertPowerOfTwo(n);

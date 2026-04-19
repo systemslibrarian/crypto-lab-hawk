@@ -253,7 +253,7 @@ function equalPolynomials(left: Polynomial, right: Polynomial): boolean {
 }
 
 function getSaltBytes(params: HawkParams): number {
-  return Math.ceil(params.saltBits / 8);
+  return (params.saltBits + 7) >> 3;
 }
 
 function shouldRestart(salt: Uint8Array, params: HawkParams): boolean {
@@ -407,7 +407,7 @@ async function simulateFalconWork(message: Uint8Array, n: number): Promise<numbe
   const targetBytes = serializePolynomial(target);
   let accumulator = 0;
 
-  for (let round = 0; round < 192; round += 1) {
+  for (let round = 0; round < 224; round += 1) {
     const digest = await sha256(concatBytes(targetBytes, encodeUint32(round)));
     accumulator += digest[0] ?? 0;
 
