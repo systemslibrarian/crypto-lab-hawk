@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "verify:phase1": "tsx scripts/verify-phase1.ts",
+    "verify:phase2": "tsx scripts/verify-phase2.ts",
     "preview": "vite preview"
   },
   "devDependencies": {
