@@ -3,14 +3,32 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#08111f" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f4efe4" media="(prefers-color-scheme: light)" />
+    <meta
+      name="description"
+      content="Browser-based educational lab for HAWK, the only lattice-based scheme still in Round 2 of NIST's additional post-quantum signature process. Integer-only Gaussian sampling, no rejection loop, side-by-side comparison with Falcon and ML-DSA."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="crypto-lab-hawk" />
+    <meta
+      property="og:description"
+      content="Browser-based educational lab for HAWK lattice signatures. Round 2 of NIST's additional PQ signatures process."
+    />
+    <meta name="twitter:card" content="summary" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23070f1c'/%3E%3Cpath d='M14 50 L26 14 L34 32 L42 14 L54 50' fill='none' stroke='%2300d4ff' stroke-width='4' stroke-linejoin='round' stroke-linecap='round'/%3E%3Ccircle cx='32' cy='30' r='2.5' fill='%23ffd700'/%3E%3C/svg%3E"
+    />
     <script>
       const saved = localStorage.getItem('theme');
       document.documentElement.setAttribute('data-theme', saved ?? 'dark');
     </script>
-    <title>crypto-lab-hawk</title>
+    <title>crypto-lab-hawk — integer-only lattice signatures</title>
   </head>
   <body>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
-  </html>
+</html>

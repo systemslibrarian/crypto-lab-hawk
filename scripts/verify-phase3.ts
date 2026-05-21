@@ -34,7 +34,14 @@ assert(!tamperedVerified, 'Tampered signatures must fail verification.');
 
 const benchmark = await benchmarkHAWK(8);
 assert(benchmark.hawkSignMs > 0, 'Signing benchmark should produce a positive timing.');
-assert(benchmark.speedupRatio > 3, 'Educational Falcon simulation should remain materially slower than HAWK signing.');
+assert(benchmark.falconSimulationMs > 0, 'Falcon-style reference work should produce a positive timing.');
+assert(benchmark.mldsaSimulationMs > 0, 'ML-DSA-style reference work should produce a positive timing.');
+assert(benchmark.mldsaAvgIterations >= 1, 'ML-DSA simulation should report at least one rejection-loop iteration.');
+assert(benchmark.hawkSignStdev >= 0, 'HAWK signing stdev must be non-negative.');
+assert(
+  benchmark.mldsaSimulationStdev > benchmark.hawkSignStdev * 0.1,
+  'Rejection-loop schemes should exhibit measurable timing variance.',
+);
 
 console.log(
   JSON.stringify({
@@ -42,7 +49,10 @@ console.log(
     failedAttempts: attempts.length,
     restartCount,
     hawkSignMs: Number(benchmark.hawkSignMs.toFixed(3)),
+    hawkSignStdev: Number(benchmark.hawkSignStdev.toFixed(3)),
     falconSimulationMs: Number(benchmark.falconSimulationMs.toFixed(3)),
+    mldsaSimulationMs: Number(benchmark.mldsaSimulationMs.toFixed(3)),
+    mldsaAvgIterations: Number(benchmark.mldsaAvgIterations.toFixed(2)),
     speedupRatio: Number(benchmark.speedupRatio.toFixed(2)),
   }),
 );

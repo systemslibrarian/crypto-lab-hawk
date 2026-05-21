@@ -2,6 +2,7 @@ import {
   DISCRETE_GAUSSIAN_TABLE_T0,
   DISCRETE_GAUSSIAN_TABLE_T1,
   sampleGaussianPolynomial,
+  simulateFalconFastFourierSamplingPass,
 } from './gaussian';
 import {
   HAWK_512_PARAMS,
@@ -399,51 +400,91 @@ export async function hawkVerify(
   return totalNorm <= verificationBound(publicKey.n);
 }
 
-async function simulateFalconWork(message: Uint8Array, n: number): Promise<number> {
-  const params = getParamsForN(n);
-  const salt = new Uint8Array(getSaltBytes(params));
-  getCrypto().getRandomValues(salt);
-  const target = await hashToPolynomial(message, salt, salt, n);
-  const targetBytes = serializePolynomial(target);
+function simulateFalconSignWork(n: number): number {
   let accumulator = 0;
+  for (let pass = 0; pass < 3; pass += 1) {
+    accumulator += simulateFalconFastFourierSamplingPass(n).accumulator;
+  }
+  return accumulator;
+}
 
-  for (let round = 0; round < 224; round += 1) {
-    const digest = await sha256(concatBytes(targetBytes, encodeUint32(round)));
-    accumulator += digest[0] ?? 0;
+/**
+ * ML-DSA's signing critical path is dominated by a rejection loop: each
+ * iteration samples y, computes the high bits of A*y, hashes to a
+ * challenge, and either accepts or restarts. Production implementations
+ * average roughly 4 iterations per signature with a wide distribution.
+ *
+ * We model that here with a geometric loop count and per-iteration work
+ * proportional to n*log(n) integer multiplications, which lets us report
+ * both a mean signing time and a meaningful timing variance number.
+ */
+function simulateMldsaSignWork(n: number): { iterations: number } {
+  let iterations = 0;
+  let acceptance = 0;
 
-    for (let index = 0; index < target.length; index += 1) {
-      const coefficient = target[index] + round;
-      accumulator += coefficient * coefficient + (index & 7);
+  while (acceptance < 1 && iterations < 16) {
+    iterations += 1;
+    let workSum = 0;
+    const passes = Math.ceil(Math.log2(n));
+
+    for (let pass = 0; pass < passes; pass += 1) {
+      for (let index = 0; index < n; index += 1) {
+        const sample = ((index * 1103515245 + pass * 12345) % 8380417) | 0;
+        workSum = (workSum + sample * (pass + 1)) | 0;
+      }
+    }
+
+    if (Math.random() < 0.235 + (workSum & 0)) {
+      acceptance = 1;
     }
   }
 
-  return accumulator;
+  return { iterations };
+}
+
+function stdev(values: number[]): number {
+  if (values.length === 0) {
+    return 0;
+  }
+
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance = values.reduce((sum, value) => sum + (value - mean) * (value - mean), 0) / values.length;
+  return Math.sqrt(variance);
 }
 
 export async function benchmarkHAWK(
   iterations: number = 100,
+  paramSet: HawkParams = HAWK_512_PARAMS,
 ): Promise<{
   hawkKeygenMs: number;
   hawkSignMs: number;
+  hawkSignStdev: number;
   hawkVerifyMs: number;
   falconSimulationMs: number;
+  falconSimulationStdev: number;
+  mldsaSimulationMs: number;
+  mldsaSimulationStdev: number;
+  mldsaAvgIterations: number;
   speedupRatio: number;
 }> {
   const message = encoder.encode('hawk benchmark message');
 
+  const hawkSignSamples: number[] = [];
+  const falconSamples: number[] = [];
+  const mldsaSamples: number[] = [];
+  const mldsaIterations: number[] = [];
+
   let keygenTotal = 0;
-  let signTotal = 0;
   let verifyTotal = 0;
-  let falconTotal = 0;
 
   for (let index = 0; index < iterations; index += 1) {
     let startedAt = nowMs();
-    const { privateKey, publicKey } = await hawkKeygen(HAWK_512_PARAMS);
+    const { privateKey, publicKey } = await hawkKeygen(paramSet);
     keygenTotal += nowMs() - startedAt;
 
     startedAt = nowMs();
     const { signature } = await hawkSign(message, privateKey);
-    signTotal += nowMs() - startedAt;
+    hawkSignSamples.push(nowMs() - startedAt);
 
     startedAt = nowMs();
     const verified = await hawkVerify(message, signature, publicKey);
@@ -454,20 +495,78 @@ export async function benchmarkHAWK(
     }
 
     startedAt = nowMs();
-    await simulateFalconWork(message, HAWK_512_PARAMS.n);
-    falconTotal += nowMs() - startedAt;
+    simulateFalconSignWork(paramSet.n);
+    falconSamples.push(nowMs() - startedAt);
+
+    startedAt = nowMs();
+    const { iterations: loops } = simulateMldsaSignWork(paramSet.n);
+    mldsaSamples.push(nowMs() - startedAt);
+    mldsaIterations.push(loops);
   }
 
-  const hawkKeygenMs = keygenTotal / iterations;
-  const hawkSignMs = signTotal / iterations;
-  const hawkVerifyMs = verifyTotal / iterations;
-  const falconSimulationMs = falconTotal / iterations;
+  const mean = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
+  const hawkSignMs = mean(hawkSignSamples);
+  const falconSimulationMs = mean(falconSamples);
+  const mldsaSimulationMs = mean(mldsaSamples);
 
   return {
-    hawkKeygenMs,
+    hawkKeygenMs: keygenTotal / iterations,
     hawkSignMs,
-    hawkVerifyMs,
+    hawkSignStdev: stdev(hawkSignSamples),
+    hawkVerifyMs: verifyTotal / iterations,
     falconSimulationMs,
+    falconSimulationStdev: stdev(falconSamples),
+    mldsaSimulationMs,
+    mldsaSimulationStdev: stdev(mldsaSamples),
+    mldsaAvgIterations: mean(mldsaIterations),
     speedupRatio: falconSimulationMs / hawkSignMs,
   };
+}
+
+/**
+ * Serialize a HAWK signature using a Golomb-Rice-style encoding for the s1
+ * polynomial. Each coefficient is encoded as a sign bit + unary high bits +
+ * a low-bits payload. The result is salt-prefixed and the bit stream is
+ * packed into whole bytes. This is the same shape the HAWK v1.1 spec uses
+ * for its compact signature format, just with simplified parameters.
+ */
+export function serializeSignature(signature: HAWKSignature): Uint8Array {
+  const params = getParamsForN(signature.n);
+  const saltBytes = getSaltBytes(params);
+  const lowBits = 5;
+  const bits: number[] = [];
+
+  for (let index = 0; index < signature.s1.length; index += 1) {
+    const value = signature.s1[index];
+    const sign = value < 0 ? 1 : 0;
+    const magnitude = Math.abs(value);
+    const low = magnitude & ((1 << lowBits) - 1);
+    const high = magnitude >> lowBits;
+
+    bits.push(sign);
+    for (let bit = lowBits - 1; bit >= 0; bit -= 1) {
+      bits.push((low >> bit) & 1);
+    }
+    for (let count = 0; count < high; count += 1) {
+      bits.push(1);
+    }
+    bits.push(0);
+  }
+
+  const byteLength = saltBytes + Math.ceil(bits.length / 8);
+  const out = new Uint8Array(byteLength);
+  out.set(signature.salt, 0);
+
+  for (let index = 0; index < bits.length; index += 1) {
+    if (bits[index]) {
+      const target = saltBytes + (index >> 3);
+      out[target] |= 1 << (7 - (index & 7));
+    }
+  }
+
+  return out;
+}
+
+export function serializePublicKey(publicKey: HAWKPublicKey): Uint8Array {
+  return concatBytes(serializePolynomial(publicKey.q00), serializePolynomial(publicKey.q01));
 }
