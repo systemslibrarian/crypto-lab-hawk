@@ -17,13 +17,16 @@ The emphasis is on HAWK's architectural differences from Falcon:
 - A simplified public/private basis story tied to the Lattice Isomorphism Problem
 - A browser-native exhibit showing why HAWK may become Falcon's conceptual successor if standardization continues successfully
 
-The UI includes five exhibits:
+The UI opens with a five-step guided learning path and then walks through six exhibits:
 
-- The three lattice signatures at a glance
-- The Gaussian sampling difference between Falcon and HAWK
-- A live HAWK signing walkthrough
-- A Round 2 standardization roadmap
-- Deployment guidance for real 2026 systems
+- The three lattice signatures at a glance, including a full side-by-side comparison matrix
+- What module-LIP means, shown as a short basis versus a bad basis over the same lattice
+- The Gaussian sampling difference between Falcon and HAWK, with a step-through of a single CDT draw that accumulates into a live tally
+- A live HAWK signing walkthrough that shows the verification identity in the open: recover (f, g), check f − g equals the public q01, and check the Euclidean norm bound, with the actual numbers
+- A Round 2 standardization roadmap and deployment guidance for real 2026 systems
+- A glossary of every key term plus a four-question self-check that grades entirely in the browser
+
+A self-test runs on page load — a real keygen → sign → verify → tamper-reject round-trip — so the honesty claims are machine-checked, not just asserted. The result shows as a badge in the header.
 
 ## When to Use It
 
@@ -75,6 +78,9 @@ If HAWK is eventually standardized, it could materially change how teams think a
 ```bash
 npm install
 npm run build
+npm test
 ```
+
+`npm test` runs the four-phase verification suite (`scripts/verify-phase*.ts`). Phase 4 is the comprehensive gold-standard check: full keygen → sign → verify round-trips for HAWK-512 and HAWK-1024, the exact verification identity, tamper rejection, serialization determinism and sizes, and a chi-square goodness-of-fit test on the discrete Gaussian sampler. CI runs the build and the suite on every push and pull request, and the GitHub Pages deploy is gated on `npm test` so a broken crypto path can never ship.
 
 The app is static and deploys to GitHub Pages with base path `/crypto-lab-hawk/`.

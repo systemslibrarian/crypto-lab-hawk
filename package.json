@@ -9,6 +9,8 @@
     "verify:phase1": "tsx scripts/verify-phase1.ts",
     "verify:phase2": "tsx scripts/verify-phase2.ts",
     "verify:phase3": "tsx scripts/verify-phase3.ts",
+    "verify:phase4": "tsx scripts/verify-phase4.ts",
+    "test": "npm run verify:phase1 && npm run verify:phase2 && npm run verify:phase3 && npm run verify:phase4",
     "preview": "vite preview"
   },
   "devDependencies": {

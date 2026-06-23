@@ -377,13 +377,56 @@ export async function hawkSign(
   throw new Error('HAWK signing restarted too many times.');
 }
 
-export async function hawkVerify(
+export interface HAWKVerifyDetail {
+  /** Final verdict: both the identity and the norm bound hold. */
+  ok: boolean;
+  /** Did the recovered basis satisfy the exact public-key identity? */
+  identityHolds: boolean;
+  /** Did the recovered basis stay inside the Euclidean norm bound? */
+  normWithinBound: boolean;
+  /** Sizes mismatched, so the rest of the check was skipped. */
+  parameterMismatch: boolean;
+  /** ||recoveredF||^2 + ||recoveredG||^2. */
+  totalNorm: number;
+  /** The acceptance bound the total norm is compared against. */
+  bound: number;
+  /** f recovered from the signature as s1 - h. */
+  recoveredF: Polynomial;
+  /** g recovered as q00 - recoveredF. */
+  recoveredG: Polynomial;
+  /** recoveredF - recoveredG, which must equal the public q01. */
+  consistency: Polynomial;
+  /** The published q01 the consistency polynomial is compared against. */
+  q01: Polynomial;
+}
+
+/**
+ * Run verification and return every intermediate quantity, not just the
+ * boolean. The UI uses this to show learners *why* a signature passes or
+ * fails: the recovered basis, the exact identity it must satisfy, and the
+ * norm compared against its bound.
+ */
+export async function hawkVerifyDetailed(
   message: Uint8Array,
   signature: HAWKSignature,
   publicKey: HAWKPublicKey,
-): Promise<boolean> {
+): Promise<HAWKVerifyDetail> {
+  const bound = verificationBound(publicKey.n);
+
   if (signature.n !== publicKey.n) {
-    return false;
+    const empty = new Int32Array(0);
+    return {
+      ok: false,
+      identityHolds: false,
+      normWithinBound: false,
+      parameterMismatch: true,
+      totalNorm: Number.NaN,
+      bound,
+      recoveredF: empty,
+      recoveredG: empty,
+      consistency: empty,
+      q01: publicKey.q01,
+    };
   }
 
   const pubKeyHash = await hashPublicKey(publicKey);
@@ -392,12 +435,31 @@ export async function hawkVerify(
   const recoveredG = polySub(publicKey.q00, recoveredF);
   const consistency = polySub(recoveredF, recoveredG);
 
-  if (!equalPolynomials(consistency, publicKey.q01)) {
-    return false;
-  }
-
+  const identityHolds = equalPolynomials(consistency, publicKey.q01);
   const totalNorm = polyNormSquared(recoveredF) + polyNormSquared(recoveredG);
-  return totalNorm <= verificationBound(publicKey.n);
+  const normWithinBound = totalNorm <= bound;
+
+  return {
+    ok: identityHolds && normWithinBound,
+    identityHolds,
+    normWithinBound,
+    parameterMismatch: false,
+    totalNorm,
+    bound,
+    recoveredF,
+    recoveredG,
+    consistency,
+    q01: publicKey.q01,
+  };
+}
+
+export async function hawkVerify(
+  message: Uint8Array,
+  signature: HAWKSignature,
+  publicKey: HAWKPublicKey,
+): Promise<boolean> {
+  const detail = await hawkVerifyDetailed(message, signature, publicKey);
+  return detail.ok;
 }
 
 function simulateFalconSignWork(n: number): number {

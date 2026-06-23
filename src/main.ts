@@ -15,11 +15,13 @@ import {
   hawkKeygen,
   hawkSign,
   hawkVerify,
+  hawkVerifyDetailed,
   serializePublicKey,
   serializeSignature,
   type HAWKPrivateKey,
   type HAWKPublicKey,
   type HAWKSignature,
+  type HAWKVerifyDetail,
 } from './hawk';
 import { HAWK_512_PARAMS, HAWK_1024_PARAMS } from './polynomial';
 
@@ -51,10 +53,25 @@ type SigningState = {
   attempts: Array<{ attempt: number; reason: string }>;
   paramSet: ParamKey;
   tampered: { verified: boolean; coefficient: number; delta: number } | null;
+  verifyDetail: HAWKVerifyDetail;
   signature: HAWKSignature;
   publicKey: HAWKPublicKey;
   privateKey: HAWKPrivateKey;
 } | null;
+
+type SelfTestState = 'idle' | 'running' | 'pass' | 'fail';
+
+type QuizState = {
+  answers: Record<string, number>;
+  score: number | null;
+};
+
+type GlossaryTerm = {
+  slug: string;
+  term: string;
+  short: string;
+  full: string;
+};
 
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -118,10 +135,103 @@ const crossLinks: CrossLink[] = [
   { name: 'crypto-lab-kyberslash', href: 'https://github.com/systemslibrarian/crypto-lab-kyberslash', blurb: 'Side-channel timing case study' },
 ];
 
+type LearningStep = { href: string; index: string; title: string; blurb: string };
+
+const learningPath: LearningStep[] = [
+  { href: '#exhibit-schemes', index: '01', title: 'Meet the three schemes', blurb: 'Where Falcon, ML-DSA, and HAWK each pay their cost.' },
+  { href: '#exhibit-lip', index: '02', title: 'See the hard problem', blurb: 'Why a short basis is secret and a long one is public.' },
+  { href: '#exhibit-gaussian', index: '03', title: 'Watch the sampler', blurb: 'Integer table walk versus floating-point rejection.' },
+  { href: '#exhibit-signing', index: '04', title: 'Sign and verify', blurb: 'A full round-trip with the identity shown in the open.' },
+  { href: '#glossary', index: '05', title: 'Check your understanding', blurb: 'Glossary of terms, then a four-question self-check.' },
+];
+
+type CompareRow = { dimension: string; falcon: string; mldsa: string; hawk: string };
+
+const compareRows: CompareRow[] = [
+  { dimension: 'Hard problem', falcon: 'NTRU-SIS', mldsa: 'Module-LWE + SIS', hawk: 'module-LIP + omSVP' },
+  { dimension: 'Signature size (NIST-I)', falcon: '666 B', mldsa: '2,420 B', hawk: '555 B' },
+  { dimension: 'Public key (NIST-I)', falcon: '897 B', mldsa: '1,312 B', hawk: '1,024 B' },
+  { dimension: 'Core arithmetic', falcon: 'Floating-point', mldsa: 'Integer', hawk: 'Integer only' },
+  { dimension: 'Signing sampler', falcon: 'Float Gaussian over a lattice', mldsa: 'Uniform + rejection', hawk: 'Integer Gaussian over Z (CDT)' },
+  { dimension: 'Rejection loop?', falcon: 'No', mldsa: 'Yes (≈3–5 iterations)', hawk: 'No' },
+  { dimension: 'Constant-time posture', falcon: 'Hard to achieve', mldsa: 'Mixed', hawk: 'Designed in' },
+  { dimension: 'Standardization', falcon: 'FIPS 206 (in progress)', mldsa: 'FIPS 204 (standard)', hawk: 'Round 2 on-ramp' },
+];
+
+const glossary: GlossaryTerm[] = [
+  { slug: 'lattice', term: 'Lattice', short: 'A regular grid of points spanned by integer combinations of basis vectors.', full: 'A lattice is the set of all integer combinations of a set of basis vectors. The same lattice can be described by many different bases — some short and almost-orthogonal, some long and skewed. Lattice cryptography hides secrets in the gap between an easy (short) basis and a hard (long) one.' },
+  { slug: 'module-lip', term: 'module-LIP', short: 'Lattice Isomorphism Problem over a module: recover a short basis from a long one.', full: 'The Lattice Isomorphism Problem asks: given two bases of the same lattice, find the transformation between them — in practice, recover a short basis from a long one. HAWK works over a module (a structured, ring-based lattice), so its assumption is "module-LIP." This is what makes HAWK signatures unforgeable without the secret short basis.' },
+  { slug: 'omsvp', term: 'omSVP', short: 'One-more Short Vector Problem — HAWK’s second supporting assumption.', full: 'The one-more Short Vector Problem (omSVP) is the assumption that, even after seeing many HAWK signatures, an attacker cannot produce one more short lattice vector of the kind a valid signature reveals. It backs HAWK’s unforgeability alongside module-LIP.' },
+  { slug: 'ntru', term: 'NTRU', short: 'A ring-based lattice family; Falcon’s keys solve an NTRU equation.', full: 'NTRU is a family of lattice problems built over polynomial rings. Falcon’s key generation must solve the NTRU equation f·G − g·F = q, which can fail for a sampled basis and force a retry. HAWK reuses NTRU-style structure but leans on the Lattice Isomorphism Problem for its security.' },
+  { slug: 'discrete-gaussian', term: 'Discrete Gaussian', short: 'A bell-curve distribution sampled over the integers instead of the reals.', full: 'A discrete Gaussian assigns each integer k a probability proportional to exp(−k² / 2σ²). Lattice signatures need samples from this distribution so the signature leaks nothing about the secret basis. HAWK samples it over Z with fixed integer tables; Falcon samples a Gaussian over a lattice using floating-point math.' },
+  { slug: 'cdt', term: 'CDT', short: 'Cumulative Distribution Table — sample by comparing one random word to fixed thresholds.', full: 'A Cumulative Distribution Table stores the running probability thresholds of a distribution. To sample, you draw one uniform random word and count how many thresholds it falls under — that count is the magnitude. Because every draw runs the same fixed comparisons with no early exit, the operation is naturally constant-time.' },
+  { slug: 'rejection-sampling', term: 'Rejection sampling', short: 'Draw a candidate, accept or retry — so the loop count (and timing) varies.', full: 'Rejection sampling proposes a candidate and accepts it with some probability, retrying otherwise. ML-DSA’s signing uses it and averages a few iterations, which makes signing time data-dependent. HAWK avoids a rejection loop on its signing critical path entirely.' },
+  { slug: 'constant-time', term: 'Constant-time', short: 'Runs in the same time regardless of secret data, defeating timing attacks.', full: 'Constant-time code takes the same amount of time and the same memory-access pattern no matter what the secret inputs are, so an attacker measuring timing learns nothing. Floating-point math and data-dependent loops make this hard, which is why HAWK’s integer-only, loop-free signing path is attractive.' },
+  { slug: 'golomb-rice', term: 'Golomb-Rice', short: 'A compact code for small integers: a few low bits plus a unary tail.', full: 'Golomb-Rice coding splits each integer into low bits stored directly and high bits stored in unary. It is efficient when values are usually small, which is exactly the case for HAWK’s signature coefficients. This demo uses a real Golomb-Rice encoder to measure signature byte sizes.' },
+  { slug: 'ntt', term: 'NTT', short: 'Number Theoretic Transform: a fast integer convolution, the integer cousin of the FFT.', full: 'The Number Theoretic Transform multiplies polynomials quickly using modular arithmetic instead of floating-point roots of unity. Production HAWK uses it to make signing fast; this educational build uses slower schoolbook multiplication for clarity, which is why production HAWK is much faster than the JS here.' },
+  { slug: 'fips', term: 'FIPS 204 / 206', short: 'NIST standards: 204 is ML-DSA (final); 206 will be Falcon (FN-DSA, in progress).', full: 'FIPS 204 standardized ML-DSA in 2024 and is production-ready today. FIPS 206 will standardize Falcon as FN-DSA and is still being finalized. HAWK is not in any FIPS draft — it is a Round 2 candidate in NIST’s additional-signatures on-ramp.' },
+];
+
+const glossaryBySlug = new Map(glossary.map((entry) => [entry.slug, entry]));
+
+type QuizQuestion = { id: string; prompt: string; options: string[]; correct: number; explain: string };
+
+const quizQuestions: QuizQuestion[] = [
+  {
+    id: 'q-constant-time',
+    prompt: 'What is the main reason HAWK’s signing path is easier to make constant-time than Falcon’s?',
+    options: [
+      'It uses no floating-point arithmetic and no data-dependent rejection loop.',
+      'It uses a faster hash function.',
+      'It produces larger signatures, which are harder to attack.',
+      'It runs entirely on the GPU.',
+    ],
+    correct: 0,
+    explain: 'HAWK samples integers from fixed tables and never branches on secret data, so there is no float rounding or variable loop count for a timing attacker to measure.',
+  },
+  {
+    id: 'q-mldsa-variance',
+    prompt: 'Why does ML-DSA signing show measurable timing variance?',
+    options: [
+      'Its signatures vary in length.',
+      'Its signing uses a rejection loop that takes a variable number of iterations.',
+      'It re-generates the keypair on every signature.',
+      'It waits for network entropy.',
+    ],
+    correct: 1,
+    explain: 'ML-DSA accepts or rejects each candidate signature, averaging roughly 3–5 iterations. The loop count depends on the data, so signing time varies.',
+  },
+  {
+    id: 'q-hardness',
+    prompt: 'HAWK’s security rests primarily on which assumption?',
+    options: [
+      'Factoring large integers.',
+      'The discrete logarithm problem.',
+      'The Lattice Isomorphism Problem (module-LIP).',
+      'The hardness of inverting SHA-256.',
+    ],
+    correct: 2,
+    explain: 'HAWK is built on module-LIP: recovering a short lattice basis from a long one. The same lattice is described by both bases; only the short one lets you sign.',
+  },
+  {
+    id: 'q-standard',
+    prompt: 'Which of these post-quantum signature schemes is standardized and production-ready today?',
+    options: [
+      'HAWK, under FIPS 205.',
+      'Falcon, under FIPS 204.',
+      'ML-DSA, under FIPS 204.',
+      'None of them are standardized yet.',
+    ],
+    correct: 2,
+    explain: 'ML-DSA was standardized as FIPS 204 in 2024. Falcon (FIPS 206) is still in progress, and HAWK is only a Round 2 candidate.',
+  },
+];
+
 type CdtWalkState = {
   trace: CdtWalkTrace;
   visibleSteps: number;
   revealedSign: boolean;
+  counted: boolean;
 };
 
 type LipState = {
@@ -142,7 +252,12 @@ const state: {
   liveMessage: string;
   pendingFocusSelector: string | null;
   cdt: CdtWalkState | null;
+  cdtSamples: number[];
   lip: LipState;
+  activeGlossary: string | null;
+  quiz: QuizState;
+  selfTest: SelfTestState;
+  copied: string | null;
 } = {
   selectedScheme: 'hawk',
   paramSet: (localStorage.getItem('hawk-param') as ParamKey | null) === '1024' ? '1024' : '512',
@@ -157,7 +272,12 @@ const state: {
   liveMessage: 'HAWK demo loaded. Round 2 status notice: educational build only.',
   pendingFocusSelector: null,
   cdt: null,
+  cdtSamples: [],
   lip: { view: 'short' },
+  activeGlossary: null,
+  quiz: { answers: {}, score: null },
+  selfTest: 'idle',
+  copied: null,
 };
 
 const schemeOrder: SchemeKey[] = ['falcon', 'mldsa', 'hawk'];
@@ -482,11 +602,21 @@ function signingMarkup(): string {
 
     <div class="signing-log" tabindex="-1">
       <div>
-        <span class="eyebrow">Salt</span>
+        <span class="eyebrow">Verification, in the open</span>
+        ${verifyMathMarkup()}
+      </div>
+      <div>
+        <div class="log-head">
+          <span class="eyebrow">Salt</span>
+          ${copyButton('salt', state.signing.saltHex, 'salt')}
+        </div>
         <p class="mono-block">${escapeHtml(state.signing.saltHex)}</p>
       </div>
       <div>
-        <span class="eyebrow">s1 preview (first 12 coefficients)</span>
+        <div class="log-head">
+          <span class="eyebrow">s1 preview (first 12 coefficients)</span>
+          ${copyButton('s1 preview', state.signing.s1Preview, 's1')}
+        </div>
         <p class="mono-block">${escapeHtml(state.signing.s1Preview)}</p>
       </div>
       <div>
@@ -500,7 +630,7 @@ function signingMarkup(): string {
       <div>
         <span class="eyebrow">Export</span>
         ${downloadMarkup()}
-        <p class="mini-note">Signature is the Golomb-Rice-encoded s1 prefixed by the salt. Public key is q00 || q01 as little-endian Int32.</p>
+        <p class="mini-note">Signature is the ${termChip('golomb-rice', 'Golomb-Rice')}-encoded s1 prefixed by the salt. Public key is q00 || q01 as little-endian Int32.</p>
       </div>
     </div>
   `;
@@ -733,6 +863,253 @@ function transparencyMarkup(): string {
   `;
 }
 
+function copyButton(label: string, payload: string, key: string): string {
+  const copied = state.copied === key;
+  return `<button class="copy-button${copied ? ' copied' : ''}" type="button" data-copy-text="${escapeHtml(payload)}" data-copy-key="${escapeHtml(key)}" aria-label="Copy ${escapeHtml(label)}">${copied ? '✓ Copied' : 'Copy'}</button>`;
+}
+
+function termChip(slug: string, label?: string): string {
+  const entry = glossaryBySlug.get(slug);
+  if (!entry) {
+    return escapeHtml(label ?? slug);
+  }
+  return `<button class="term-chip" type="button" data-term="${escapeHtml(slug)}" aria-describedby="glossary-${escapeHtml(slug)}" title="${escapeHtml(entry.short)}">${escapeHtml(label ?? entry.term)}</button>`;
+}
+
+function learningPathMarkup(): string {
+  const steps = learningPath
+    .map(
+      (step) => `
+        <li>
+          <a class="path-step" href="${step.href}" data-path-step>
+            <span class="path-index" aria-hidden="true">${step.index}</span>
+            <span class="path-body">
+              <span class="path-title">${escapeHtml(step.title)}</span>
+              <span class="path-blurb">${escapeHtml(step.blurb)}</span>
+            </span>
+          </a>
+        </li>`,
+    )
+    .join('');
+
+  return `
+    <nav class="learning-path" aria-label="Suggested learning path">
+      <p class="eyebrow">Start here · a five-step tour</p>
+      <ol class="path-list">${steps}</ol>
+    </nav>
+  `;
+}
+
+function comparisonTableMarkup(): string {
+  const rows = compareRows
+    .map(
+      (row) => `
+        <tr>
+          <th scope="row">${escapeHtml(row.dimension)}</th>
+          <td>${escapeHtml(row.falcon)}</td>
+          <td>${escapeHtml(row.mldsa)}</td>
+          <td class="compare-hawk">${escapeHtml(row.hawk)}</td>
+        </tr>`,
+    )
+    .join('');
+
+  return `
+    <div class="table-scroll">
+      <table class="compare-table">
+        <caption class="sr-only">Side-by-side comparison of Falcon, ML-DSA, and HAWK across eight dimensions. The HAWK column is highlighted.</caption>
+        <thead>
+          <tr>
+            <th scope="col">Dimension</th>
+            <th scope="col">Falcon</th>
+            <th scope="col">ML-DSA</th>
+            <th scope="col" class="compare-hawk">HAWK</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <p class="mini-note">Sizes are the commonly cited NIST-I figures for each scheme. ML-DSA is the only row that is standardized and deployable today; the HAWK column is the design this lab explores.</p>
+  `;
+}
+
+function verifyMathMarkup(): string {
+  if (!state.signing) {
+    return '';
+  }
+  const detail = state.signing.verifyDetail;
+  if (detail.parameterMismatch) {
+    return '<p class="mini-note">Parameter sets did not match, so the basis identity was not checked.</p>';
+  }
+
+  const fPreview = previewPolynomial(detail.recoveredF, 8);
+  const gPreview = previewPolynomial(detail.recoveredG, 8);
+  const lhsPreview = previewPolynomial(detail.consistency, 8);
+  const rhsPreview = previewPolynomial(detail.q01, 8);
+
+  return `
+    <div class="verify-math" aria-label="Verification math">
+      <ol class="verify-steps">
+        <li>
+          <span class="verify-label">Recover f = s1 − h</span>
+          <p class="mono-block">[ ${escapeHtml(fPreview)} … ]</p>
+        </li>
+        <li>
+          <span class="verify-label">Recover g = q00 − f</span>
+          <p class="mono-block">[ ${escapeHtml(gPreview)} … ]</p>
+        </li>
+        <li class="${detail.identityHolds ? 'verify-pass' : 'verify-fail'}">
+          <span class="verify-label">Identity check: does f − g equal the public q01?</span>
+          <p class="mono-block">f − g = [ ${escapeHtml(lhsPreview)} … ]</p>
+          <p class="mono-block">q01  = [ ${escapeHtml(rhsPreview)} … ]</p>
+          <p class="verify-verdict">${detail.identityHolds ? '✓ identical — the recovered basis is consistent with the public key' : '✗ mismatch — this is not a valid signature for this key'}</p>
+        </li>
+        <li class="${detail.normWithinBound ? 'verify-pass' : 'verify-fail'}">
+          <span class="verify-label">Norm bound: is ‖f‖² + ‖g‖² within the acceptance bound?</span>
+          <p class="mono-block">${Number.isNaN(detail.totalNorm) ? '—' : detail.totalNorm.toLocaleString()} ${detail.normWithinBound ? '≤' : '>'} ${detail.bound.toLocaleString()}</p>
+          <p class="verify-verdict">${detail.normWithinBound ? '✓ short enough — the signer knew the secret short basis' : '✗ too long — rejected'}</p>
+        </li>
+      </ol>
+      <p class="mini-note">Verification never sees f or g directly. It reconstructs them from the public key plus the signature, then checks an exact polynomial identity and a length bound. A single flipped coefficient breaks the first check — try the tamper test below.</p>
+    </div>
+  `;
+}
+
+function cdtAggregateMarkup(): string {
+  const samples = state.cdtSamples;
+  if (samples.length === 0) {
+    return '';
+  }
+
+  const counts = new Map<number, number>();
+  for (const value of samples) {
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+  const keys = Array.from(counts.keys()).sort((a, b) => a - b);
+  const maxCount = Math.max(...counts.values());
+
+  const bars = keys
+    .map((k) => {
+      const count = counts.get(k) ?? 0;
+      const pct = (count / maxCount) * 100;
+      return `
+        <div class="cdt-tally-row">
+          <span class="cdt-tally-key">${k > 0 ? `+${k}` : k}</span>
+          <span class="cdt-tally-bar"><span style="width:${pct.toFixed(1)}%"></span></span>
+          <span class="cdt-tally-count">${count}</span>
+        </div>`;
+    })
+    .join('');
+
+  const last = samples[samples.length - 1];
+  return `
+    <div class="cdt-aggregate" aria-live="polite">
+      <p class="mini-note">Your hand-drawn samples so far: <strong>${samples.length}</strong>. Latest landed at k = ${last > 0 ? `+${last}` : last}. Each draw above is one bar here — run a few thousand and this shape converges to the smooth theoretical curve plotted in the histogram.</p>
+      <div class="cdt-tally" role="img" aria-label="Tally of ${samples.length} hand-drawn CDT samples by value">${bars}</div>
+    </div>
+  `;
+}
+
+function glossaryMarkup(): string {
+  const items = glossary
+    .map((entry) => {
+      const open = state.activeGlossary === entry.slug;
+      return `
+        <div class="glossary-entry${open ? ' open' : ''}" id="glossary-${entry.slug}">
+          <button class="glossary-term" type="button" data-glossary="${entry.slug}" aria-expanded="${open}" aria-controls="glossary-body-${entry.slug}">
+            <span>${escapeHtml(entry.term)}</span>
+            <span class="glossary-toggle" aria-hidden="true">${open ? '−' : '+'}</span>
+          </button>
+          <div class="glossary-body" id="glossary-body-${entry.slug}" ${open ? '' : 'hidden'}>
+            <p class="glossary-short">${escapeHtml(entry.short)}</p>
+            <p class="glossary-full">${escapeHtml(entry.full)}</p>
+          </div>
+        </div>`;
+    })
+    .join('');
+
+  return `<div class="glossary-grid">${items}</div>`;
+}
+
+function quizMarkup(): string {
+  const answered = Object.keys(state.quiz.answers).length;
+  const total = quizQuestions.length;
+
+  const questions = quizQuestions
+    .map((question, qIndex) => {
+      const chosen = state.quiz.answers[question.id];
+      const hasAnswer = chosen !== undefined;
+      const options = question.options
+        .map((option, oIndex) => {
+          const selected = chosen === oIndex;
+          const isCorrect = oIndex === question.correct;
+          let cls = 'quiz-option';
+          if (hasAnswer && selected) {
+            cls += isCorrect ? ' quiz-correct' : ' quiz-wrong';
+          }
+          if (hasAnswer && isCorrect) {
+            cls += ' quiz-answer';
+          }
+          return `
+            <button class="${cls}" type="button" role="radio" aria-checked="${selected}" data-quiz="${question.id}" data-quiz-option="${oIndex}" ${hasAnswer ? 'disabled' : ''}>
+              <span class="quiz-marker" aria-hidden="true"></span>
+              <span>${escapeHtml(option)}</span>
+            </button>`;
+        })
+        .join('');
+
+      const feedback = hasAnswer
+        ? `<p class="quiz-feedback ${chosen === question.correct ? 'good' : 'bad'}">${chosen === question.correct ? 'Correct. ' : 'Not quite. '}${escapeHtml(question.explain)}</p>`
+        : '';
+
+      return `
+        <fieldset class="quiz-question">
+          <legend><span class="quiz-q-index">Q${qIndex + 1}.</span> ${escapeHtml(question.prompt)}</legend>
+          <div class="quiz-options" role="radiogroup" aria-label="Answer choices for question ${qIndex + 1}">${options}</div>
+          ${feedback}
+        </fieldset>`;
+    })
+    .join('');
+
+  const scoreLine =
+    answered === total
+      ? `<p class="quiz-score" role="status">You answered all ${total} — score ${state.quiz.score}/${total}. <button class="ghost-button" type="button" data-action="quiz-reset">Reset quiz</button></p>`
+      : `<p class="mini-note">${answered} of ${total} answered. Pick an option to lock in each answer and see why.</p>`;
+
+  return `
+    <div class="quiz">
+      ${questions}
+      ${scoreLine}
+    </div>
+  `;
+}
+
+const selfTestBadgeCopy: Record<SelfTestState, { cls: string; text: string }> = {
+  idle: { cls: 'pending', text: 'Self-test queued' },
+  running: { cls: 'pending', text: 'Self-test running…' },
+  pass: { cls: 'pass', text: '✓ Self-test passed in your browser' },
+  fail: { cls: 'fail', text: '✗ Self-test failed — see console' },
+};
+
+function selfTestBadgeMarkup(): string {
+  const badge = selfTestBadgeCopy[state.selfTest];
+  return `<span class="self-test-badge ${badge.cls}" id="self-test-badge" role="status" title="Live keygen → sign → verify → tamper-reject round-trip run on page load">${badge.text}</span>`;
+}
+
+/**
+ * Update only the badge element in place. The self-test runs on load and must
+ * not rebuild the whole view, or it could steal focus from a visitor who
+ * started interacting in the first moments after load.
+ */
+function paintSelfTestBadge(): void {
+  const el = document.getElementById('self-test-badge');
+  if (!el) {
+    return;
+  }
+  const badge = selfTestBadgeCopy[state.selfTest];
+  el.className = `self-test-badge ${badge.cls}`;
+  el.textContent = badge.text;
+}
+
 function render(): void {
   appRoot.innerHTML = `
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -748,6 +1125,7 @@ function render(): void {
             <button class="pill-button" type="button" data-action="theme-toggle" aria-pressed="${state.theme === 'light'}" aria-label="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode">Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode</button>
             <span class="status-badge round-2">Round 2, not standardized</span>
             <span class="status-badge caution">Educational build only</span>
+            ${selfTestBadgeMarkup()}
           </div>
         </div>
         <aside class="hero-aside">
@@ -766,7 +1144,9 @@ function render(): void {
         </aside>
       </section>
 
-      <section class="exhibit" aria-labelledby="exhibit-one-title">
+      ${learningPathMarkup()}
+
+      <section class="exhibit" id="exhibit-schemes" aria-labelledby="exhibit-one-title">
         <div class="section-heading">
           <span class="eyebrow">Exhibit 1</span>
           <h2 id="exhibit-one-title">The Three Lattice Signatures</h2>
@@ -816,22 +1196,24 @@ function render(): void {
           </article>
         </div>
         ${schemeDetailMarkup()}
+        <h3 class="compare-heading">Full comparison, at a glance</h3>
+        ${comparisonTableMarkup()}
       </section>
 
-      <section class="exhibit" aria-labelledby="exhibit-lip-title">
+      <section class="exhibit" id="exhibit-lip" aria-labelledby="exhibit-lip-title">
         <div class="section-heading">
           <span class="eyebrow">Exhibit 1.5</span>
           <h2 id="exhibit-lip-title">What module-LIP actually means</h2>
-          <p>HAWK's hardness assumption is the Lattice Isomorphism Problem: given two bases of the same lattice, find a short one from a long one. The two views below span <em>the same lattice</em>; only the basis differs.</p>
+          <p>HAWK's hardness assumption is the ${termChip('module-lip', 'Lattice Isomorphism Problem')}: given two bases of the same ${termChip('lattice')}, find a short one from a long one. The two views below span <em>the same lattice</em>; only the basis differs.</p>
         </div>
         ${lipMarkup()}
       </section>
 
-      <section class="exhibit" aria-labelledby="exhibit-two-title" aria-busy="${state.busyGaussian}">
+      <section class="exhibit" id="exhibit-gaussian" aria-labelledby="exhibit-two-title" aria-busy="${state.busyGaussian}">
         <div class="section-heading">
           <span class="eyebrow">Exhibit 2</span>
           <h2 id="exhibit-two-title">The Gaussian Sampling Difference</h2>
-          <p>HAWK samples over Z with fixed integer tables. Falcon samples over a lattice with floating-point machinery. The histogram below overlays observed counts on the closed-form theoretical PMF.</p>
+          <p>HAWK samples a ${termChip('discrete-gaussian')} over Z with fixed integer tables (a ${termChip('cdt')}). Falcon samples over a lattice with floating-point machinery and ${termChip('rejection-sampling', 'rejection sampling')}. The histogram below overlays observed counts on the closed-form theoretical PMF.</p>
         </div>
         <div class="two-column">
           <article class="flow-card accent-amber">
@@ -859,10 +1241,11 @@ no transcendental functions anywhere</pre>
           <h3>Inside one CDT sample</h3>
           <p class="mini-note">Aggregate stats are useful but the algorithm is best understood at the level of one draw. Walk through it.</p>
           ${cdtWalkMarkup()}
+          ${cdtAggregateMarkup()}
         </div>
       </section>
 
-      <section class="exhibit" aria-labelledby="exhibit-three-title" aria-busy="${state.busySigning}">
+      <section class="exhibit" id="exhibit-signing" aria-labelledby="exhibit-three-title" aria-busy="${state.busySigning}">
         <div class="section-heading">
           <span class="eyebrow">Exhibit 3</span>
           <h2 id="exhibit-three-title">HAWK Signing In Action</h2>
@@ -887,7 +1270,7 @@ no transcendental functions anywhere</pre>
 
       ${transparencyMarkup()}
 
-      <section class="exhibit roadmap" aria-labelledby="exhibit-four-title">
+      <section class="exhibit roadmap" id="exhibit-roadmap" aria-labelledby="exhibit-four-title">
         <div class="section-heading">
           <span class="eyebrow">Exhibit 4</span>
           <h2 id="exhibit-four-title">Standardization Roadmap</h2>
@@ -913,7 +1296,7 @@ no transcendental functions anywhere</pre>
         </div>
       </section>
 
-      <section class="exhibit deployment" aria-labelledby="exhibit-five-title">
+      <section class="exhibit deployment" id="exhibit-deploy" aria-labelledby="exhibit-five-title">
         <div class="section-heading">
           <span class="eyebrow">Exhibit 5</span>
           <h2 id="exhibit-five-title">Why This Matters For Deployment</h2>
@@ -937,6 +1320,21 @@ no transcendental functions anywhere</pre>
         <ul class="cross-links">
           ${crossLinks.map((link) => `<li><a href="${link.href}" rel="noopener" target="_blank"><span class="cross-name">${link.name}</span><span class="cross-blurb">${link.blurb}</span></a></li>`).join('')}
         </ul>
+      </section>
+
+      <section class="exhibit" id="glossary" aria-labelledby="exhibit-glossary-title">
+        <div class="section-heading">
+          <span class="eyebrow">Exhibit 6</span>
+          <h2 id="exhibit-glossary-title">Glossary &amp; self-check</h2>
+          <p>Every underlined term elsewhere on this page jumps here. Expand a card for the full explanation, then test yourself below.</p>
+        </div>
+        ${glossaryMarkup()}
+
+        <div class="quiz-section" id="quiz">
+          <h3>Four-question self-check</h3>
+          <p class="mini-note">No grading server, no tracking — this runs entirely in your browser. Pick an answer to see why it is right or wrong.</p>
+          ${quizMarkup()}
+        </div>
       </section>
     </main>
 
@@ -1034,7 +1432,8 @@ async function runSigningDemo(): Promise<void> {
       attempts.push({ attempt, reason });
     });
     const { signature, signingTimeMs, restartCount } = await hawkSign(message, privateKey);
-    const verified = await hawkVerify(message, signature, publicKey);
+    const verifyDetail = await hawkVerifyDetailed(message, signature, publicKey);
+    const verified = verifyDetail.ok;
     const serializedSig = serializeSignature(signature);
     const serializedPk = serializePublicKey(publicKey);
     const benchmark = await benchmarkHAWK(state.paramSet === '1024' ? 4 : 8, params);
@@ -1052,6 +1451,7 @@ async function runSigningDemo(): Promise<void> {
       attempts,
       paramSet: state.paramSet,
       tampered: null,
+      verifyDetail,
       signature,
       publicKey,
       privateKey,
@@ -1188,7 +1588,7 @@ function bindEvents(): void {
   });
 
   document.querySelector<HTMLButtonElement>('[data-action="cdt-new"]')?.addEventListener('click', () => {
-    state.cdt = { trace: traceDiscreteGaussian(DISCRETE_GAUSSIAN_TABLE_T1), visibleSteps: 0, revealedSign: false };
+    state.cdt = { trace: traceDiscreteGaussian(DISCRETE_GAUSSIAN_TABLE_T1), visibleSteps: 0, revealedSign: false, counted: false };
     setLiveMessage('New CDT draw ready. Step through the seven threshold comparisons.');
     render();
   });
@@ -1207,10 +1607,11 @@ function bindEvents(): void {
 
   document.querySelector<HTMLButtonElement>('[data-action="cdt-fast"]')?.addEventListener('click', () => {
     if (!state.cdt) {
-      state.cdt = { trace: traceDiscreteGaussian(DISCRETE_GAUSSIAN_TABLE_T1), visibleSteps: 0, revealedSign: false };
+      state.cdt = { trace: traceDiscreteGaussian(DISCRETE_GAUSSIAN_TABLE_T1), visibleSteps: 0, revealedSign: false, counted: false };
     }
     state.cdt.visibleSteps = state.cdt.trace.steps.length;
     state.cdt.revealedSign = true;
+    recordCdtSample();
     setLiveMessage(`Walk complete. Sample value ${state.cdt.trace.sample}.`);
     render();
   });
@@ -1220,6 +1621,7 @@ function bindEvents(): void {
       return;
     }
     state.cdt.revealedSign = true;
+    recordCdtSample();
     setLiveMessage(`Sign bit revealed. Sample value ${state.cdt.trace.sample}.`);
     render();
   });
@@ -1248,6 +1650,142 @@ function bindEvents(): void {
     const data = serializePublicKey(state.signing.publicKey);
     downloadBlob(`hawk-${state.signing.paramSet}-publickey.bin`, data);
   });
+
+  document.querySelectorAll<HTMLButtonElement>('[data-glossary]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const slug = button.dataset.glossary ?? null;
+      state.activeGlossary = state.activeGlossary === slug ? null : slug;
+      const entry = slug ? glossaryBySlug.get(slug) : undefined;
+      if (entry && state.activeGlossary === slug) {
+        setLiveMessage(`${entry.term}: ${entry.short}`);
+      }
+      setPendingFocus(`[data-glossary="${slug}"]`);
+      render();
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('[data-term]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const slug = button.dataset.term ?? null;
+      if (!slug) {
+        return;
+      }
+      state.activeGlossary = slug;
+      const entry = glossaryBySlug.get(slug);
+      setLiveMessage(entry ? `Jumped to glossary: ${entry.term}.` : 'Jumped to glossary.');
+      render();
+      requestAnimationFrame(() => {
+        const target = document.querySelector<HTMLElement>(`#glossary-${slug}`);
+        target?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' });
+        document.querySelector<HTMLButtonElement>(`[data-glossary="${slug}"]`)?.focus();
+      });
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('[data-quiz]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const id = button.dataset.quiz;
+      const option = Number(button.dataset.quizOption);
+      if (!id || Number.isNaN(option) || state.quiz.answers[id] !== undefined) {
+        return;
+      }
+      state.quiz.answers[id] = option;
+      const question = quizQuestions.find((entry) => entry.id === id);
+      const correct = question?.correct === option;
+      if (Object.keys(state.quiz.answers).length === quizQuestions.length) {
+        state.quiz.score = quizQuestions.reduce(
+          (sum, entry) => sum + (state.quiz.answers[entry.id] === entry.correct ? 1 : 0),
+          0,
+        );
+      }
+      setLiveMessage(`${correct ? 'Correct.' : 'Not quite.'} ${question?.explain ?? ''}`);
+      setPendingFocus(`[data-quiz="${id}"][data-quiz-option="${option}"]`);
+      render();
+    });
+  });
+
+  document.querySelector<HTMLButtonElement>('[data-action="quiz-reset"]')?.addEventListener('click', () => {
+    state.quiz = { answers: {}, score: null };
+    setLiveMessage('Quiz reset.');
+    render();
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('[data-copy-text]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const text = button.dataset.copyText ?? '';
+      const key = button.dataset.copyKey ?? null;
+      void copyToClipboard(text, key);
+    });
+  });
+}
+
+function recordCdtSample(): void {
+  if (!state.cdt || state.cdt.counted) {
+    return;
+  }
+  state.cdt.counted = true;
+  state.cdtSamples.push(state.cdt.trace.sample);
+}
+
+function prefersReducedMotion(): boolean {
+  return globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+}
+
+async function copyToClipboard(text: string, key: string | null): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    state.copied = key;
+    setLiveMessage('Copied to clipboard.');
+    render();
+    if (key) {
+      globalThis.setTimeout(() => {
+        if (state.copied === key) {
+          state.copied = null;
+          render();
+        }
+      }, 1600);
+    }
+  } catch {
+    setLiveMessage('Clipboard copy was blocked by the browser.');
+  }
+}
+
+/**
+ * Run the core HAWK round-trip live in the visitor's browser so the honesty
+ * claims on this page are machine-checked, not just asserted: generate a
+ * keypair, sign, verify (must pass), then flip one coefficient and verify
+ * again (must fail). The badge in the hero reflects the outcome.
+ */
+async function runSelfTest(): Promise<void> {
+  state.selfTest = 'running';
+  paintSelfTestBadge();
+
+  try {
+    const message = new TextEncoder().encode('crypto-lab-hawk self-test');
+    const { privateKey, publicKey } = await hawkKeygen(HAWK_512_PARAMS);
+    const { signature } = await hawkSign(message, privateKey);
+
+    const genuine = await hawkVerify(message, signature, publicKey);
+
+    const tampered: HAWKSignature = {
+      salt: signature.salt,
+      s1: Int32Array.from(signature.s1),
+      n: signature.n,
+    };
+    tampered.s1[0] += 1;
+    const tamperRejected = !(await hawkVerify(message, tampered, publicKey));
+
+    const passed = genuine && tamperRejected;
+    state.selfTest = passed ? 'pass' : 'fail';
+    if (!passed) {
+      console.error('HAWK self-test failed', { genuine, tamperRejected });
+    }
+  } catch (error) {
+    state.selfTest = 'fail';
+    console.error('HAWK self-test threw', error);
+  } finally {
+    paintSelfTestBadge();
+  }
 }
 
 function downloadBlob(filename: string, data: Uint8Array): void {
@@ -1263,3 +1801,4 @@ function downloadBlob(filename: string, data: Uint8Array): void {
 }
 
 render();
+void runSelfTest();
