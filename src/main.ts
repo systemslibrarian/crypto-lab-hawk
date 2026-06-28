@@ -1343,6 +1343,7 @@ no transcendental functions anywhere</pre>
         Whether therefore ye eat, or drink, or whatsoever ye do, do all to the glory of God.
         <footer>1 Corinthians 10:31</footer>
       </blockquote>
+      <p class="footer-meta">Related demos: <a href="https://systemslibrarian.github.io/crypto-lab-falcon-seal/" rel="noopener" target="_blank">crypto-lab-falcon-seal</a> &middot; <a href="https://systemslibrarian.github.io/crypto-lab-dilithium-seal/" rel="noopener" target="_blank">crypto-lab-dilithium-seal</a> &middot; <a href="https://systemslibrarian.github.io/crypto-lab-sphincs-ledger/" rel="noopener" target="_blank">crypto-lab-sphincs-ledger</a> &middot; <a href="https://systemslibrarian.github.io/crypto-lab-multivariate/" rel="noopener" target="_blank">crypto-lab-multivariate</a> &middot; <a href="https://systemslibrarian.github.io/crypto-lab-hybrid-sign/" rel="noopener" target="_blank">crypto-lab-hybrid-sign</a></p>
       <p class="footer-meta">crypto-lab-hawk &middot; Educational build &middot; HAWK v1.1 framing &middot; <a href="https://github.com/systemslibrarian/crypto-lab-hawk" rel="noopener" target="_blank">Source on GitHub</a></p>
     </footer>
   `;
