@@ -1,11 +1,8 @@
 # crypto-lab-hawk
 
-Browser-based educational demo of HAWK, the post-quantum signature scheme by Léo Ducas, Eamonn W. Postlethwaite, Ludo N. Pulles, and Wessel van Woerden. HAWK is the only lattice-based scheme in Round 2 of NIST's Additional Digital Signatures process after NIST IR 8528 (October 2024). This repo focuses on the structural reasons HAWK is interesting in 2026: integer-only arithmetic, discrete Gaussian sampling over Z through fixed lookup tables, no rejection loop in signing, and a cleaner constant-time story than Falcon.
-
-> "Whether therefore ye eat, or drink, or whatsoever ye do, do all to the glory of God."
-> 1 Corinthians 10:31
-
 ## What It Is
+
+Browser-based educational demo of HAWK, the post-quantum signature scheme by Léo Ducas, Eamonn W. Postlethwaite, Ludo N. Pulles, and Wessel van Woerden. HAWK is the only lattice-based scheme in Round 2 of NIST's Additional Digital Signatures process after NIST IR 8528 (October 2024). This repo focuses on the structural reasons HAWK is interesting in 2026: integer-only arithmetic, discrete Gaussian sampling over Z through fixed lookup tables, no rejection loop in signing, and a cleaner constant-time story than Falcon.
 
 This is a Vite + TypeScript + vanilla CSS educational lab that compares Falcon, ML-DSA, and HAWK side by side. The demo implements HAWK-512 and HAWK-1024 at educational fidelity around the HAWK v1.1 specification dated February 5, 2025. It is intentionally not a production implementation and does not claim byte-exact compatibility with the official reference code.
 
@@ -38,12 +35,13 @@ Use this repo when you want to:
 - Show students how discrete Gaussian sampling over Z differs from Falcon's lattice-centered sampling
 - Illustrate why HAWK is attractive for constrained devices, FHE, and MPC-oriented discussions
 - Keep an eye on possible 2027+ post-standardization adoption paths
-
-Do not use this repo for production signatures. If you need production-ready PQ signatures now, use ML-DSA per FIPS 204 and deploy with crypto agility.
+- Do NOT use this repo for production signatures — if you need production-ready PQ signatures now, use ML-DSA per FIPS 204 and deploy with crypto agility.
 
 ## Live Demo
 
-https://systemslibrarian.github.io/crypto-lab-hawk/
+**[systemslibrarian.github.io/crypto-lab-hawk](https://systemslibrarian.github.io/crypto-lab-hawk/)**
+
+The lab opens with a five-step guided path, then six exhibits: the three lattice signatures at a glance, a module-LIP short-basis vs bad-basis view, a step-through of HAWK's integer-only discrete Gaussian sampling against Falcon's, a live HAWK-512/1024 signing walkthrough that exposes the verification identity and norm bound with real numbers, a Round 2 standardization roadmap, and a glossary plus self-check. A keygen → sign → verify → tamper-reject self-test runs on page load and reports as a header badge.
 
 ## What Can Go Wrong
 
@@ -67,6 +65,23 @@ As of April 2026, the most practical deployment guidance is still:
 
 If HAWK is eventually standardized, it could materially change how teams think about compact lattice signatures on constrained or side-channel-sensitive platforms. If it is not selected, it will still have influenced the direction of future post-Falcon designs.
 
+## How to Run Locally
+
+```bash
+git clone https://github.com/systemslibrarian/crypto-lab-hawk
+cd crypto-lab-hawk
+npm install
+npm run dev
+```
+
+## Related Demos
+
+- [crypto-lab-falcon-seal](https://systemslibrarian.github.io/crypto-lab-falcon-seal/) — Falcon, the compact lattice signature HAWK is positioned to succeed.
+- [crypto-lab-dilithium-seal](https://systemslibrarian.github.io/crypto-lab-dilithium-seal/) — ML-DSA (FIPS 204), the production PQ signature standard.
+- [crypto-lab-sphincs-ledger](https://systemslibrarian.github.io/crypto-lab-sphincs-ledger/) — SLH-DSA, the hash-based PQ signature alternative.
+- [crypto-lab-multivariate](https://systemslibrarian.github.io/crypto-lab-multivariate/) — UOV, a non-lattice PQ signature family for contrast.
+- [crypto-lab-hybrid-sign](https://systemslibrarian.github.io/crypto-lab-hybrid-sign/) — composite Ed25519 + ML-DSA-65 signatures for transitional deployment.
+
 ## References
 
 - Ducas, Postlethwaite, Pulles, van Woerden, Hawk: Module LIP makes Lattice Signatures Fast, Compact and Simple, ASIACRYPT 2022
@@ -84,3 +99,9 @@ npm test
 `npm test` runs the four-phase verification suite (`scripts/verify-phase*.ts`). Phase 4 is the comprehensive gold-standard check: full keygen → sign → verify round-trips for HAWK-512 and HAWK-1024, the exact verification identity, tamper rejection, serialization determinism and sizes, and a chi-square goodness-of-fit test on the discrete Gaussian sampler. CI runs the build and the suite on every push and pull request, and the GitHub Pages deploy is gated on `npm test` so a broken crypto path can never ship.
 
 The app is static and deploys to GitHub Pages with base path `/crypto-lab-hawk/`.
+
+---
+
+*One of 60+ browser demos in the [Crypto Lab](https://crypto-lab.systemslibrarian.dev/) suite.*
+
+*"So whether you eat or drink or whatever you do, do it all for the glory of God." — 1 Corinthians 10:31*
