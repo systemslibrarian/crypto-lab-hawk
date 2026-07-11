@@ -914,7 +914,7 @@ function comparisonTableMarkup(): string {
     .join('');
 
   return `
-    <div class="table-scroll">
+    <div class="table-scroll" tabindex="0" role="region" aria-label="Scheme comparison table (scroll horizontally to see all columns)">
       <table class="compare-table">
         <caption class="sr-only">Side-by-side comparison of Falcon, ML-DSA, and HAWK across eight dimensions. The HAWK column is highlighted.</caption>
         <thead>

@@ -11,12 +11,15 @@
     "verify:phase3": "tsx scripts/verify-phase3.ts",
     "verify:phase4": "tsx scripts/verify-phase4.ts",
     "test": "npm run verify:phase1 && npm run verify:phase2 && npm run verify:phase3 && npm run verify:phase4",
+    "test:a11y": "playwright test",
     "preview": "vite preview"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.61.1",
     "@types/node": "^22.15.3",
-    "typescript": "^5.8.3",
     "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
     "vite": "^7.0.0"
   }
 }
