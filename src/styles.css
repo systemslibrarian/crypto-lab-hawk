@@ -1,6 +1,7 @@
 :root {
   color-scheme: dark;
   --bg: #08111f;
+  --bg-mid: #060b12;
   --bg-soft: rgba(13, 27, 45, 0.82);
   --panel: rgba(10, 24, 42, 0.78);
   --panel-strong: rgba(7, 18, 33, 0.9);
@@ -9,9 +10,9 @@
   --line: rgba(255, 255, 255, 0.1);
   --cyan: #00d4ff;
   --amber: #ffaa00;
-  --magenta: #ff00aa;
+  --magenta: #ff40bd;
   --green: #00ff88;
-  --purple: #9d4edd;
+  --purple: #b98af5;
   --gold: #ffd700;
   --shadow: 0 28px 80px rgba(0, 0, 0, 0.35);
   font-family: "Space Grotesk", "Avenir Next Condensed", "Segoe UI", sans-serif;
@@ -20,12 +21,19 @@
 :root[data-theme='light'] {
   color-scheme: light;
   --bg: #f4efe4;
+  --bg-mid: #ece5d6;
   --bg-soft: rgba(255, 249, 239, 0.84);
   --panel: rgba(255, 252, 247, 0.88);
   --panel-strong: rgba(255, 255, 255, 0.94);
   --text: #18222d;
   --muted: #516270;
   --line: rgba(24, 34, 45, 0.12);
+  --cyan: #0c6079;
+  --amber: #8a5c00;
+  --magenta: #ad006d;
+  --green: #067647;
+  --purple: #6d28d9;
+  --gold: #7d5b00;
   --shadow: 0 24px 60px rgba(51, 67, 84, 0.12);
 }
 
@@ -40,7 +48,7 @@ body {
   background:
     radial-gradient(circle at top left, rgba(0, 212, 255, 0.14), transparent 30%),
     radial-gradient(circle at 85% 15%, rgba(255, 170, 0, 0.12), transparent 28%),
-    linear-gradient(180deg, var(--bg), #060b12 55%, var(--bg));
+    linear-gradient(180deg, var(--bg), var(--bg-mid) 55%, var(--bg));
   color: var(--text);
 }
 
@@ -82,7 +90,7 @@ button:disabled {
   z-index: 20;
   padding: 12px 14px;
   border-radius: 999px;
-  background: var(--panel-strong);
+  background-color: var(--panel-strong);
   border: 1px solid var(--line);
   transform: translateY(-160%);
   transition: transform 160ms ease;
@@ -114,7 +122,7 @@ button:disabled {
   padding: 16px 18px;
   border-radius: 18px;
   border: 1px solid rgba(255, 170, 0, 0.35);
-  background: rgba(255, 170, 0, 0.12);
+  background-color: rgba(255, 170, 0, 0.12);
 }
 
 .hero,
@@ -202,7 +210,7 @@ button:disabled {
   padding: 12px 18px;
   border-radius: 999px;
   color: var(--text);
-  background: rgba(255, 255, 255, 0.06);
+  background-color: rgba(255, 255, 255, 0.06);
 }
 
 .primary-button {
@@ -224,17 +232,17 @@ button:disabled {
 }
 
 .round-2 {
-  background: rgba(157, 78, 221, 0.16);
+  background-color: rgba(157, 78, 221, 0.16);
 }
 
 .caution {
-  background: rgba(255, 170, 0, 0.14);
+  background-color: rgba(255, 170, 0, 0.14);
 }
 
 .hero-aside {
   padding: 22px;
   border-radius: 24px;
-  background: rgba(255, 255, 255, 0.04);
+  background-color: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--line);
 }
 
@@ -253,7 +261,7 @@ blockquote {
   margin: 0;
   padding: 18px 20px;
   border-left: 3px solid var(--gold);
-  background: rgba(255, 215, 0, 0.08);
+  background-color: rgba(255, 215, 0, 0.08);
   border-radius: 16px;
 }
 
@@ -292,12 +300,12 @@ blockquote footer {
   min-height: 100%;
   padding: 22px;
   border-radius: 22px;
-  background: rgba(255, 255, 255, 0.03);
+  background-color: rgba(255, 255, 255, 0.03);
 }
 
 .scheme-card.active {
   border-color: currentColor;
-  background: rgba(255, 255, 255, 0.08);
+  background-color: rgba(255, 255, 255, 0.08);
 }
 
 .scheme-card h3,
@@ -329,7 +337,7 @@ blockquote footer {
   padding: 18px;
   border-radius: 20px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.035);
+  background-color: rgba(255, 255, 255, 0.035);
 }
 
 .comparison-strip article {
@@ -400,7 +408,7 @@ blockquote footer {
 .hist-bar {
   height: 12px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background-color: rgba(255, 255, 255, 0.08);
   overflow: hidden;
 }
 
@@ -428,7 +436,7 @@ blockquote footer {
   resize: vertical;
   border-radius: 18px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.04);
+  background-color: rgba(255, 255, 255, 0.04);
   color: var(--text);
 }
 
@@ -479,7 +487,7 @@ blockquote footer {
   padding: 14px 16px;
   border-radius: 16px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.04);
+  background-color: rgba(255, 255, 255, 0.04);
   text-decoration: none;
   transition: transform 160ms ease, border-color 160ms ease;
 }
@@ -509,7 +517,7 @@ blockquote footer {
   padding: 16px;
   border-radius: 20px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.035);
+  background-color: rgba(255, 255, 255, 0.035);
 }
 
 .histogram-figure svg {
@@ -545,7 +553,7 @@ blockquote footer {
 }
 
 .swatch-theory {
-  background: transparent;
+  background-color: transparent;
   border: 2px solid var(--magenta);
   border-radius: 999px;
   width: 12px;
@@ -586,7 +594,7 @@ blockquote footer {
   margin: 0 0 18px;
   padding: 4px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
+  background-color: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--line);
   flex-wrap: wrap;
   gap: 4px;
@@ -595,7 +603,7 @@ blockquote footer {
 .param-toggle button {
   padding: 10px 18px;
   border-radius: 999px;
-  background: transparent;
+  background-color: transparent;
   border: 1px solid transparent;
   color: var(--text);
   cursor: pointer;
@@ -603,7 +611,7 @@ blockquote footer {
 }
 
 .param-toggle button.active {
-  background: rgba(0, 212, 255, 0.16);
+  background-color: rgba(0, 212, 255, 0.16);
   border-color: rgba(0, 212, 255, 0.4);
   color: var(--cyan);
 }
@@ -620,7 +628,7 @@ blockquote footer {
   padding: 18px;
   border-radius: 18px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
+  background-color: rgba(255, 255, 255, 0.03);
 }
 
 .bench-card h4 {
@@ -655,7 +663,7 @@ blockquote footer {
   gap: 12px;
   padding: 10px 12px;
   border-radius: 12px;
-  background: rgba(255, 170, 0, 0.08);
+  background-color: rgba(255, 170, 0, 0.08);
   border: 1px solid rgba(255, 170, 0, 0.18);
   font-size: 0.88rem;
 }
@@ -683,7 +691,7 @@ blockquote footer {
   padding: 10px 16px;
   border-radius: 999px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.04);
+  background-color: rgba(255, 255, 255, 0.04);
   color: var(--text);
   cursor: pointer;
   font-size: 0.9rem;
@@ -712,7 +720,7 @@ blockquote footer {
 }
 
 .tamper-hard {
-  background: rgba(0, 255, 136, 0.1);
+  background-color: rgba(0, 255, 136, 0.1);
   border-color: rgba(0, 255, 136, 0.35);
 }
 
@@ -721,7 +729,7 @@ blockquote footer {
 }
 
 .tamper-soft {
-  background: rgba(255, 170, 0, 0.12);
+  background-color: rgba(255, 170, 0, 0.12);
   border-color: rgba(255, 170, 0, 0.4);
 }
 
@@ -801,7 +809,7 @@ blockquote footer {
   padding: 10px 14px;
   border-radius: 12px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
+  background-color: rgba(255, 255, 255, 0.03);
   font-size: 0.9rem;
 }
 
@@ -811,12 +819,12 @@ blockquote footer {
 
 .cdt-accept {
   border-color: rgba(0, 255, 136, 0.35);
-  background: rgba(0, 255, 136, 0.06);
+  background-color: rgba(0, 255, 136, 0.06);
 }
 
 .cdt-reject {
   border-color: rgba(255, 170, 0, 0.25);
-  background: rgba(255, 170, 0, 0.04);
+  background-color: rgba(255, 170, 0, 0.04);
 }
 
 .cdt-step-index {
@@ -842,7 +850,7 @@ blockquote footer {
   padding: 14px 18px;
   border-radius: 14px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.04);
+  background-color: rgba(255, 255, 255, 0.04);
   font-size: 1rem;
 }
 
@@ -852,12 +860,12 @@ blockquote footer {
 
 .cdt-final.positive {
   border-color: rgba(0, 212, 255, 0.4);
-  background: rgba(0, 212, 255, 0.08);
+  background-color: rgba(0, 212, 255, 0.08);
 }
 
 .cdt-final.negative {
   border-color: rgba(255, 0, 170, 0.4);
-  background: rgba(255, 0, 170, 0.08);
+  background-color: rgba(255, 0, 170, 0.08);
 }
 
 .cdt-final.pending {
@@ -874,7 +882,7 @@ blockquote footer {
   display: inline-flex;
   padding: 4px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
+  background-color: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--line);
   gap: 4px;
 }
@@ -882,7 +890,7 @@ blockquote footer {
 .lip-controls button {
   padding: 10px 16px;
   border-radius: 999px;
-  background: transparent;
+  background-color: transparent;
   border: 1px solid transparent;
   color: var(--text);
   cursor: pointer;
@@ -890,7 +898,7 @@ blockquote footer {
 }
 
 .lip-controls button.active {
-  background: rgba(157, 78, 221, 0.18);
+  background-color: rgba(157, 78, 221, 0.18);
   border-color: rgba(157, 78, 221, 0.45);
   color: var(--purple);
 }
@@ -899,7 +907,7 @@ blockquote footer {
   display: block;
   width: 100%;
   height: auto;
-  background: rgba(255, 255, 255, 0.02);
+  background-color: rgba(255, 255, 255, 0.02);
   border-radius: 18px;
   border: 1px solid var(--line);
   color: var(--cyan);
@@ -934,20 +942,20 @@ blockquote footer {
 }
 
 .swatch-short {
-  background: var(--cyan);
+  background-color: var(--cyan);
 }
 
 .swatch-long {
-  background: var(--gold);
+  background-color: var(--gold);
 }
 
 .swatch-target {
-  background: var(--magenta);
+  background-color: var(--magenta);
   border-radius: 999px;
 }
 
 .swatch-nearest {
-  background: var(--green);
+  background-color: var(--green);
   border-radius: 999px;
 }
 
@@ -1036,7 +1044,7 @@ blockquote footer {
 }
 
 .muted {
-  opacity: 0.9;
+  color: var(--muted);
 }
 
 /* Self-test badge */
@@ -1049,18 +1057,18 @@ blockquote footer {
 }
 
 .self-test-badge.pending {
-  background: rgba(255, 255, 255, 0.05);
+  background-color: rgba(255, 255, 255, 0.05);
   color: var(--muted);
 }
 
 .self-test-badge.pass {
-  background: rgba(0, 255, 136, 0.12);
+  background-color: rgba(0, 255, 136, 0.12);
   border-color: rgba(0, 255, 136, 0.4);
   color: var(--green);
 }
 
 .self-test-badge.fail {
-  background: rgba(255, 0, 170, 0.12);
+  background-color: rgba(255, 0, 170, 0.12);
   border-color: rgba(255, 0, 170, 0.4);
   color: var(--magenta);
 }
@@ -1092,7 +1100,7 @@ blockquote footer {
   padding: 14px 16px;
   border-radius: 16px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.035);
+  background-color: rgba(255, 255, 255, 0.035);
   text-decoration: none;
   color: var(--text);
   transition: transform 160ms ease, border-color 160ms ease;
@@ -1160,7 +1168,7 @@ blockquote footer {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
-  background: rgba(255, 255, 255, 0.03);
+  background-color: rgba(255, 255, 255, 0.03);
 }
 
 .compare-table tbody th {
@@ -1174,7 +1182,7 @@ blockquote footer {
 }
 
 .compare-table .compare-hawk {
-  background: rgba(0, 212, 255, 0.08);
+  background-color: rgba(0, 212, 255, 0.08);
   color: var(--text);
   border-left: 1px solid rgba(0, 212, 255, 0.25);
   border-right: 1px solid rgba(0, 212, 255, 0.25);
@@ -1226,7 +1234,7 @@ blockquote footer {
   padding: 12px 14px 12px 44px;
   border-radius: 14px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
+  background-color: rgba(255, 255, 255, 0.03);
 }
 
 .verify-steps li::before {
@@ -1242,7 +1250,7 @@ blockquote footer {
   border-radius: 999px;
   font-family: "IBM Plex Mono", "Cascadia Code", monospace;
   font-size: 0.8rem;
-  background: rgba(255, 255, 255, 0.08);
+  background-color: rgba(255, 255, 255, 0.08);
   color: var(--muted);
 }
 
@@ -1265,7 +1273,7 @@ blockquote footer {
 
 .verify-pass {
   border-color: rgba(0, 255, 136, 0.35);
-  background: rgba(0, 255, 136, 0.06);
+  background-color: rgba(0, 255, 136, 0.06);
 }
 
 .verify-pass .verify-verdict {
@@ -1273,13 +1281,13 @@ blockquote footer {
 }
 
 .verify-pass::before {
-  background: rgba(0, 255, 136, 0.2);
+  background-color: rgba(0, 255, 136, 0.2);
   color: var(--green);
 }
 
 .verify-fail {
   border-color: rgba(255, 0, 170, 0.4);
-  background: rgba(255, 0, 170, 0.07);
+  background-color: rgba(255, 0, 170, 0.07);
 }
 
 .verify-fail .verify-verdict {
@@ -1287,7 +1295,7 @@ blockquote footer {
 }
 
 .verify-fail::before {
-  background: rgba(255, 0, 170, 0.2);
+  background-color: rgba(255, 0, 170, 0.2);
   color: var(--magenta);
 }
 
@@ -1325,7 +1333,7 @@ blockquote footer {
 .cdt-tally-bar {
   height: 10px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background-color: rgba(255, 255, 255, 0.08);
   overflow: hidden;
 }
 
@@ -1350,7 +1358,7 @@ blockquote footer {
   padding: 5px 12px;
   border-radius: 999px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.04);
+  background-color: rgba(255, 255, 255, 0.04);
   color: var(--muted);
   cursor: pointer;
   font-size: 0.76rem;
@@ -1378,7 +1386,7 @@ blockquote footer {
 .glossary-entry {
   border: 1px solid var(--line);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.03);
+  background-color: rgba(255, 255, 255, 0.03);
   overflow: hidden;
 }
 
@@ -1448,7 +1456,7 @@ blockquote footer {
   padding: 18px;
   border: 1px solid var(--line);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.03);
+  background-color: rgba(255, 255, 255, 0.03);
 }
 
 .quiz-question legend {
@@ -1479,7 +1487,7 @@ blockquote footer {
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
+  background-color: rgba(255, 255, 255, 0.02);
   color: var(--text);
   cursor: pointer;
   text-align: left;
@@ -1507,27 +1515,27 @@ blockquote footer {
 
 .quiz-answer {
   border-color: rgba(0, 255, 136, 0.5);
-  background: rgba(0, 255, 136, 0.07);
+  background-color: rgba(0, 255, 136, 0.07);
 }
 
 .quiz-answer .quiz-marker {
   border-color: var(--green);
-  background: var(--green);
+  background-color: var(--green);
 }
 
 .quiz-correct {
   border-color: rgba(0, 255, 136, 0.6);
-  background: rgba(0, 255, 136, 0.12);
+  background-color: rgba(0, 255, 136, 0.12);
 }
 
 .quiz-wrong {
   border-color: rgba(255, 0, 170, 0.55);
-  background: rgba(255, 0, 170, 0.1);
+  background-color: rgba(255, 0, 170, 0.1);
 }
 
 .quiz-wrong .quiz-marker {
   border-color: var(--magenta);
-  background: var(--magenta);
+  background-color: var(--magenta);
 }
 
 .quiz-feedback {
@@ -1539,13 +1547,13 @@ blockquote footer {
 }
 
 .quiz-feedback.good {
-  background: rgba(0, 255, 136, 0.08);
+  background-color: rgba(0, 255, 136, 0.08);
   border: 1px solid rgba(0, 255, 136, 0.3);
   color: var(--text);
 }
 
 .quiz-feedback.bad {
-  background: rgba(255, 170, 0, 0.1);
+  background-color: rgba(255, 170, 0, 0.1);
   border: 1px solid rgba(255, 170, 0, 0.3);
   color: var(--text);
 }
