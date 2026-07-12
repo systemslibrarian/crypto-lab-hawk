@@ -1,44 +1,62 @@
 import {
   DISCRETE_GAUSSIAN_TABLE_T0,
-  DISCRETE_GAUSSIAN_TABLE_T1,
-  sampleGaussianPolynomial,
   simulateFalconFastFourierSamplingPass,
 } from './gaussian';
 import {
   HAWK_512_PARAMS,
   HAWK_1024_PARAMS,
   polyAdd,
-  polyInfNorm,
-  polyNormSquared,
-  polySub,
+  polyAddMod2,
+  polyAdjoint,
+  polyInvMod2,
+  polyMod2,
+  polyMul,
+  polyMulMod2,
   type Polynomial,
 } from './polynomial';
 
+/**
+ * HAWK secret key: the short lattice basis B = [[f, F], [g, G]] over
+ * R = Z[X]/(X^n + 1). Signing needs the actual short integers; the public
+ * key exposes only their Gram matrix, never the basis itself.
+ */
 export interface HAWKPrivateKey {
-  kgseed: Uint8Array;
-  F_mod_2: Polynomial;
-  G_mod_2: Polynomial;
+  f: Polynomial;
+  g: Polynomial;
+  F: Polynomial;
+  G: Polynomial;
   pubKeyHash: Uint8Array;
   n: number;
 }
 
+/**
+ * HAWK public key. The Gram matrix Q = B* B (q00, q01, q11) is what
+ * verification uses to measure a signature's length without ever seeing the
+ * short basis; basisMod2 is the parity image [[f,F],[g,G]] mod 2, which is
+ * public and lets the verifier bind a signature's coset to the message.
+ */
 export interface HAWKPublicKey {
   q00: Polynomial;
   q01: Polynomial;
+  q11: Polynomial;
+  basisMod2: { f: Polynomial; g: Polynomial; F: Polynomial; G: Polynomial };
   n: number;
 }
 
+/**
+ * HAWK signature: a short integer coordinate vector c = (c0, c1) such that
+ * the lattice point B·c lands in the message's parity coset. c0 is the ring
+ * element the UI historically called s1's companion; both are published so
+ * the verifier can recompute the quadratic form under the public Gram matrix.
+ */
 export interface HAWKSignature {
   salt: Uint8Array;
+  c0: Polynomial;
   s1: Polynomial;
   n: number;
 }
 
 type HawkParams = typeof HAWK_512_PARAMS | typeof HAWK_1024_PARAMS;
-type HAWKPrivateKeyWithCache = HAWKPrivateKey & {
-  _cachedF?: Polynomial;
-  _cachedG?: Polynomial;
-};
 
 const encoder = new TextEncoder();
 
@@ -152,45 +170,45 @@ async function sampleDeterministicGaussianPolynomial(
   return coefficients;
 }
 
-async function hashToPolynomial(
+/**
+ * Hash the message (bound to salt and public key) to a parity target
+ * h = (h0, h1) in {0,1}^{2n}. This is the coset a valid signature's lattice
+ * point B·c must land in; it is what ties a signature to a specific message.
+ */
+async function hashToParityTarget(
   message: Uint8Array,
   salt: Uint8Array,
   pubKeyHash: Uint8Array,
   n: number,
-): Promise<Polynomial> {
-  const target = new Int32Array(n);
+): Promise<{ h0: Polynomial; h1: Polynomial }> {
+  const h0 = new Int32Array(n);
+  const h1 = new Int32Array(n);
   let filled = 0;
   let counter = 0;
 
-  while (filled < n) {
+  // Two coset polynomials of n bits each = 2n bits total.
+  while (filled < 2 * n) {
     const block = await sha256(
       concatBytes(pubKeyHash, salt, encodeUint32(counter), message),
     );
 
-    for (let index = 0; index < block.length && filled < n; index += 1) {
-      const candidate = block[index];
-      if (candidate >= 250) {
-        continue;
+    for (let byteIndex = 0; byteIndex < block.length && filled < 2 * n; byteIndex += 1) {
+      const byte = block[byteIndex];
+      for (let bit = 0; bit < 8 && filled < 2 * n; bit += 1) {
+        const value = (byte >> bit) & 1;
+        if (filled < n) {
+          h0[filled] = value;
+        } else {
+          h1[filled - n] = value;
+        }
+        filled += 1;
       }
-
-      target[filled] = (candidate % 5) - 2;
-      filled += 1;
     }
 
     counter += 1;
   }
 
-  return target;
-}
-
-function normalizeMod2(poly: Polynomial): Polynomial {
-  const reduced = new Int32Array(poly.length);
-
-  for (let index = 0; index < poly.length; index += 1) {
-    reduced[index] = poly[index] & 1;
-  }
-
-  return reduced;
+  return { h0, h1 };
 }
 
 function serializePolynomial(poly: Polynomial): Uint8Array {
@@ -205,79 +223,126 @@ function serializePolynomial(poly: Polynomial): Uint8Array {
 }
 
 async function hashPublicKey(publicKey: HAWKPublicKey): Promise<Uint8Array> {
-  return sha256(concatBytes(serializePolynomial(publicKey.q00), serializePolynomial(publicKey.q01)));
+  return sha256(
+    concatBytes(
+      serializePolynomial(publicKey.q00),
+      serializePolynomial(publicKey.q01),
+      serializePolynomial(publicKey.q11),
+      serializePolynomial(publicKey.basisMod2.f),
+      serializePolynomial(publicKey.basisMod2.g),
+      serializePolynomial(publicKey.basisMod2.F),
+      serializePolynomial(publicKey.basisMod2.G),
+    ),
+  );
 }
 
-function toyKeygenFailureReason(f: Polynomial, g: Polynomial): string | null {
-  if (f[0] === 0 && g[0] === 0) {
-    return 'toy NTRU solve failed: both constant coefficients were zero';
-  }
-
-  if (polyInfNorm(f) > 6 || polyInfNorm(g) > 6) {
-    return 'toy NTRU solve failed: sampled basis was too wide';
-  }
-
-  return null;
+/**
+ * Build the public Gram matrix Q = B* B from the secret basis, entirely via
+ * ring multiplication and adjoints:
+ *   q00 = f* f + g* g,   q01 = f* F + g* G,   q11 = F* F + G* G.
+ * These are the only inner products a verifier ever learns about the basis.
+ */
+function gramMatrix(
+  f: Polynomial,
+  g: Polynomial,
+  F: Polynomial,
+  G: Polynomial,
+): { q00: Polynomial; q01: Polynomial; q11: Polynomial } {
+  const q00 = polyAdd(polyMul(polyAdjoint(f), f), polyMul(polyAdjoint(g), g));
+  const q01 = polyAdd(polyMul(polyAdjoint(f), F), polyMul(polyAdjoint(g), G));
+  const q11 = polyAdd(polyMul(polyAdjoint(F), F), polyMul(polyAdjoint(G), G));
+  return { q00, q01, q11 };
 }
 
-async function derivePrivateBasis(seed: Uint8Array, n: number): Promise<{ f: Polynomial; g: Polynomial; F: Polynomial; G: Polynomial }> {
+/**
+ * The squared Euclidean length of the lattice point B·c, computed from the
+ * PUBLIC Gram matrix alone as the constant term of c* Q c. Because Q = B* B,
+ * this equals ||B c||^2 exactly, so verification measures a signature's
+ * length using only the public key — the heart of HAWK's verify identity.
+ */
+function quadraticFormNorm(
+  c0: Polynomial,
+  c1: Polynomial,
+  q00: Polynomial,
+  q01: Polynomial,
+  q11: Polynomial,
+): number {
+  const t00 = polyMul(polyMul(polyAdjoint(c0), q00), c0);
+  const t01 = polyMul(polyMul(polyAdjoint(c0), q01), c1);
+  const t10 = polyMul(polyMul(polyAdjoint(c1), polyAdjoint(q01)), c0);
+  const t11 = polyMul(polyMul(polyAdjoint(c1), q11), c1);
+  const sum = polyAdd(polyAdd(t00, t01), polyAdd(t10, t11));
+  return sum[0];
+}
+
+/**
+ * Sample a fresh short basis B = [[f,F],[g,G]] from the discrete Gaussian
+ * over Z. This is where HAWK's integer-only sampler feeds real key material.
+ */
+async function sampleBasis(
+  seed: Uint8Array,
+  n: number,
+): Promise<{ f: Polynomial; g: Polynomial; F: Polynomial; G: Polynomial }> {
   const basisSeed = concatBytes(seed, encodeUint32(n));
   const f = await sampleDeterministicGaussianPolynomial(n, DISCRETE_GAUSSIAN_TABLE_T0, basisSeed, 'hawk-f');
   const g = await sampleDeterministicGaussianPolynomial(n, DISCRETE_GAUSSIAN_TABLE_T0, basisSeed, 'hawk-g');
-  const F = new Int32Array(n);
-  const G = new Int32Array(n);
-
-  for (let index = 0; index < n; index += 1) {
-    F[index] = -g[index];
-    G[index] = f[index];
-  }
-
+  const F = await sampleDeterministicGaussianPolynomial(n, DISCRETE_GAUSSIAN_TABLE_T0, basisSeed, 'hawk-F');
+  const G = await sampleDeterministicGaussianPolynomial(n, DISCRETE_GAUSSIAN_TABLE_T0, basisSeed, 'hawk-G');
   return { f, g, F, G };
 }
 
-function copyBytes(input: Uint8Array): Uint8Array {
-  return new Uint8Array(input);
+/**
+ * Invert the 2x2 parity basis (B mod 2) over (Z/2)[X]/(X^n+1). Returns null
+ * when det B is not a unit mod 2 — the honest analogue of HAWK's NTRU solve
+ * failing for a sampled basis, which forces a keygen retry.
+ */
+function invertParityBasis(
+  fB: Polynomial,
+  gB: Polynomial,
+  FB: Polynomial,
+  GB: Polynomial,
+): { a: Polynomial; b: Polynomial; c: Polynomial; d: Polynomial } | null {
+  // det = fG - gF; mod 2, subtraction is addition.
+  const det = polyAddMod2(polyMulMod2(fB, GB), polyMulMod2(gB, FB));
+  const detInv = polyInvMod2(det);
+  if (!detInv) {
+    return null;
+  }
+
+  // inverse = det^{-1} * [[G, F],[g, f]] (mod 2, since -1 = 1).
+  return {
+    a: polyMulMod2(detInv, GB),
+    b: polyMulMod2(detInv, FB),
+    c: polyMulMod2(detInv, gB),
+    d: polyMulMod2(detInv, fB),
+  };
 }
 
-function equalPolynomials(left: Polynomial, right: Polynomial): boolean {
-  if (left.length !== right.length) {
-    return false;
+function keygenFailureReason(
+  parityInverse: ReturnType<typeof invertParityBasis>,
+): string | null {
+  if (!parityInverse) {
+    return 'NTRU solve failed: the sampled basis is singular mod 2 (det not a unit)';
   }
-
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) {
-      return false;
-    }
-  }
-
-  return true;
+  return null;
 }
 
 function getSaltBytes(params: HawkParams): number {
   return (params.saltBits + 7) >> 3;
 }
 
-function shouldRestart(salt: Uint8Array, params: HawkParams): boolean {
-  const bits = params.n === HAWK_512_PARAMS.n ? 18 : 19;
-  let remaining = bits;
-  let index = 0;
-
-  while (remaining > 0 && index < salt.length) {
-    const current = salt[index];
-    const take = Math.min(remaining, 8);
-    if ((current >> (8 - take)) !== 0) {
-      return false;
-    }
-
-    remaining -= take;
-    index += 1;
-  }
-
-  return remaining === 0;
-}
-
+/**
+ * The signature-length acceptance bound. A genuine signature is a coset
+ * representative B·c with c a {0,1} coordinate vector, so its squared length
+ * is bounded by the basis energy; a forged/tampered c overshoots this.
+ */
 function verificationBound(n: number): number {
-  return n * 18;
+  // A genuine signature is a coset representative B·c with c a {0,1}
+  // coordinate vector, so ||B c||^2 is bounded by the basis energy summed
+  // over ~n active coordinates. Empirically genuine norms stay well under
+  // these ceilings for both parameter sets, while a lattice vector built
+  // from a wider/forged coordinate set overshoots them.
+  return n === HAWK_512_PARAMS.n ? 12_000_000 : 40_000_000;
 }
 
 export async function hawkKeygen(
@@ -295,28 +360,41 @@ export async function hawkKeygen(
     const kgseed = new Uint8Array(32);
     getCrypto().getRandomValues(kgseed);
 
-    const { f, g, F, G } = await derivePrivateBasis(kgseed, params.n);
-    const failure = toyKeygenFailureReason(f, g);
-    if (failure) {
-      onAttempt?.(attempt, failure);
+    const { f, g, F, G } = await sampleBasis(kgseed, params.n);
+
+    const fB = polyMod2(f);
+    const gB = polyMod2(g);
+    const FB = polyMod2(F);
+    const GB = polyMod2(G);
+
+    // The signer must be able to hit any parity coset, which requires the
+    // parity basis to be invertible mod 2. This is the honest analogue of
+    // HAWK's NTRU solve succeeding for the sampled basis.
+    const parityInverse = invertParityBasis(fB, gB, FB, GB);
+    const failure = keygenFailureReason(parityInverse);
+    if (failure || !parityInverse) {
+      onAttempt?.(attempt, failure ?? 'NTRU solve failed');
       continue;
     }
 
+    const { q00, q01, q11 } = gramMatrix(f, g, F, G);
+
     const publicKey: HAWKPublicKey = {
-      q00: polyAdd(f, g),
-      q01: polySub(f, g),
+      q00,
+      q01,
+      q11,
+      basisMod2: { f: fB, g: gB, F: FB, G: GB },
       n: params.n,
     };
 
     const pubKeyHash = await hashPublicKey(publicKey);
-    const privateKey: HAWKPrivateKeyWithCache = {
-      kgseed: copyBytes(kgseed),
-      F_mod_2: normalizeMod2(F),
-      G_mod_2: normalizeMod2(G),
+    const privateKey: HAWKPrivateKey = {
+      f,
+      g,
+      F,
+      G,
       pubKeyHash,
       n: params.n,
-      _cachedF: f,
-      _cachedG: g,
     };
 
     return {
@@ -339,34 +417,48 @@ export async function hawkSign(
 }> {
   const params = getParamsForN(privateKey.n);
   const startedAt = nowMs();
-  const cachedPrivateKey = privateKey as HAWKPrivateKeyWithCache;
-  const f = cachedPrivateKey._cachedF ?? (await derivePrivateBasis(privateKey.kgseed, privateKey.n)).f;
+  const { f, g, F, G } = privateKey;
 
-  if (!cachedPrivateKey._cachedF) {
-    cachedPrivateKey._cachedF = f;
+  const fB = polyMod2(f);
+  const gB = polyMod2(g);
+  const FB = polyMod2(F);
+  const GB = polyMod2(G);
+  const parityInverse = invertParityBasis(fB, gB, FB, GB);
+  if (!parityInverse) {
+    throw new Error('HAWK signing failed: parity basis is not invertible.');
   }
 
+  const bound = verificationBound(privateKey.n);
+  const { q00, q01, q11 } = gramMatrix(f, g, F, G);
   let restartCount = 0;
 
-  while (restartCount < 4) {
+  // No rejection loop on the arithmetic: each pass draws a fresh salt, solves
+  // the parity coset once (a single linear solve mod 2, no retry inside), and
+  // only restarts in the rare event the resulting coset vector is too long.
+  while (restartCount < 8) {
     const salt = new Uint8Array(getSaltBytes(params));
     getCrypto().getRandomValues(salt);
 
-    const perturbation = sampleGaussianPolynomial(privateKey.n, DISCRETE_GAUSSIAN_TABLE_T1);
-    const hiddenNorm = polyNormSquared(polyAdd(f, perturbation));
+    const { h0, h1 } = await hashToParityTarget(message, salt, privateKey.pubKeyHash, privateKey.n);
 
-    if (shouldRestart(salt, params) && hiddenNorm > verificationBound(privateKey.n)) {
+    // Solve (B mod 2) c = h  =>  c = (B mod 2)^{-1} h, giving coordinates in
+    // {0,1}. B·c is then a lattice point in the message's parity coset.
+    const c0 = polyAddMod2(polyMulMod2(parityInverse.a, h0), polyMulMod2(parityInverse.b, h1));
+    const c1 = polyAddMod2(polyMulMod2(parityInverse.c, h0), polyMulMod2(parityInverse.d, h1));
+
+    // Length of the lattice point B·c, measured via the public Gram matrix.
+    const norm = quadraticFormNorm(c0, c1, q00, q01, q11);
+
+    if (norm > bound) {
       restartCount += 1;
       continue;
     }
 
-    const h = await hashToPolynomial(message, salt, privateKey.pubKeyHash, privateKey.n);
-    const s1 = polyAdd(h, f);
-
     return {
       signature: {
         salt,
-        s1,
+        c0,
+        s1: c1,
         n: privateKey.n,
       },
       signingTimeMs: nowMs() - startedAt,
@@ -378,33 +470,35 @@ export async function hawkSign(
 }
 
 export interface HAWKVerifyDetail {
-  /** Final verdict: both the identity and the norm bound hold. */
+  /** Final verdict: parity binding holds and the length bound holds. */
   ok: boolean;
-  /** Did the recovered basis satisfy the exact public-key identity? */
+  /** Does the signature's coset match the message's parity target under B mod 2? */
   identityHolds: boolean;
-  /** Did the recovered basis stay inside the Euclidean norm bound? */
+  /** Is the lattice point B·c within the Euclidean length bound (via public Q)? */
   normWithinBound: boolean;
   /** Sizes mismatched, so the rest of the check was skipped. */
   parameterMismatch: boolean;
-  /** ||recoveredF||^2 + ||recoveredG||^2. */
+  /** ||B c||^2 computed as the constant term of c* Q c from the public key. */
   totalNorm: number;
   /** The acceptance bound the total norm is compared against. */
   bound: number;
-  /** f recovered from the signature as s1 - h. */
+  /** The recovered coset image (B mod 2)·c, first coordinate. */
   recoveredF: Polynomial;
-  /** g recovered as q00 - recoveredF. */
+  /** The recovered coset image (B mod 2)·c, second coordinate. */
   recoveredG: Polynomial;
-  /** recoveredF - recoveredG, which must equal the public q01. */
+  /** The recomputed parity target h0 || h1 the coset image must equal. */
   consistency: Polynomial;
-  /** The published q01 the consistency polynomial is compared against. */
+  /** The coset image the target is compared against (h0 || h1 side by side). */
   q01: Polynomial;
 }
 
 /**
  * Run verification and return every intermediate quantity, not just the
- * boolean. The UI uses this to show learners *why* a signature passes or
- * fails: the recovered basis, the exact identity it must satisfy, and the
- * norm compared against its bound.
+ * boolean. Verification uses only the PUBLIC key: it reconstructs the coset
+ * image of the signature under the parity basis (message binding, via
+ * polyMul mod 2) and measures the lattice point's length under the Gram
+ * matrix c* Q c (via polyMul). A single flipped coefficient breaks the coset
+ * match or overshoots the bound, so neither check is tautological.
  */
 export async function hawkVerifyDetailed(
   message: Uint8Array,
@@ -412,6 +506,7 @@ export async function hawkVerifyDetailed(
   publicKey: HAWKPublicKey,
 ): Promise<HAWKVerifyDetail> {
   const bound = verificationBound(publicKey.n);
+  const n = publicKey.n;
 
   if (signature.n !== publicKey.n) {
     const empty = new Int32Array(0);
@@ -425,19 +520,44 @@ export async function hawkVerifyDetailed(
       recoveredF: empty,
       recoveredG: empty,
       consistency: empty,
-      q01: publicKey.q01,
+      q01: empty,
     };
   }
 
   const pubKeyHash = await hashPublicKey(publicKey);
-  const h = await hashToPolynomial(message, signature.salt, pubKeyHash, publicKey.n);
-  const recoveredF = polySub(signature.s1, h);
-  const recoveredG = polySub(publicKey.q00, recoveredF);
-  const consistency = polySub(recoveredF, recoveredG);
+  const { h0, h1 } = await hashToParityTarget(message, signature.salt, pubKeyHash, n);
 
-  const identityHolds = equalPolynomials(consistency, publicKey.q01);
-  const totalNorm = polyNormSquared(recoveredF) + polyNormSquared(recoveredG);
-  const normWithinBound = totalNorm <= bound;
+  const c0 = polyMod2(signature.c0);
+  const c1 = polyMod2(signature.s1);
+  const { f: fB, g: gB, F: FB, G: GB } = publicKey.basisMod2;
+
+  // Recompute the coset image (B mod 2)·c from the PUBLIC parity basis.
+  const image0 = polyAddMod2(polyMulMod2(fB, c0), polyMulMod2(FB, c1));
+  const image1 = polyAddMod2(polyMulMod2(gB, c0), polyMulMod2(GB, c1));
+
+  let identityHolds = true;
+  for (let index = 0; index < n; index += 1) {
+    if (image0[index] !== h0[index] || image1[index] !== h1[index]) {
+      identityHolds = false;
+      break;
+    }
+  }
+
+  // Length of the lattice point via the public Gram matrix.
+  const totalNorm = quadraticFormNorm(
+    signature.c0,
+    signature.s1,
+    publicKey.q00,
+    publicKey.q01,
+    publicKey.q11,
+  );
+  const normWithinBound = totalNorm >= 0 && totalNorm <= bound;
+
+  // Side-by-side polynomials for the UI: recovered coset image vs. target.
+  const recoveredF = image0;
+  const recoveredG = image1;
+  const consistency = concatPolynomials(image0, image1);
+  const targetSideBySide = concatPolynomials(h0, h1);
 
   return {
     ok: identityHolds && normWithinBound,
@@ -449,8 +569,15 @@ export async function hawkVerifyDetailed(
     recoveredF,
     recoveredG,
     consistency,
-    q01: publicKey.q01,
+    q01: targetSideBySide,
   };
+}
+
+function concatPolynomials(a: Polynomial, b: Polynomial): Polynomial {
+  const out = new Int32Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
 }
 
 export async function hawkVerify(
@@ -471,37 +598,41 @@ function simulateFalconSignWork(n: number): number {
 }
 
 /**
+ * Illustrative model of ML-DSA's signing loop shape (NOT production ML-DSA).
  * ML-DSA's signing critical path is dominated by a rejection loop: each
- * iteration samples y, computes the high bits of A*y, hashes to a
- * challenge, and either accepts or restarts. Production implementations
- * average roughly 4 iterations per signature with a wide distribution.
+ * iteration samples y, computes the high bits of A*y, hashes to a challenge,
+ * and either accepts or restarts. Production implementations average roughly
+ * four iterations per signature with a wide distribution.
  *
- * We model that here with a geometric loop count and per-iteration work
- * proportional to n*log(n) integer multiplications, which lets us report
- * both a mean signing time and a meaningful timing variance number.
+ * We reproduce that *shape* with a per-iteration integer workload (so the
+ * timing reflects real work, not a hand-tuned constant) and an acceptance
+ * probability of ~0.235 per pass, which yields a mean near four iterations.
+ * The point is the iteration-count distribution, not a wall-clock claim.
  */
-function simulateMldsaSignWork(n: number): { iterations: number } {
-  let iterations = 0;
-  let acceptance = 0;
+const MLDSA_ACCEPT_PROBABILITY = 0.235;
 
-  while (acceptance < 1 && iterations < 16) {
+function simulateMldsaSignWork(n: number): { iterations: number; work: number } {
+  let iterations = 0;
+  let accepted = false;
+  let work = 0;
+
+  while (!accepted && iterations < 16) {
     iterations += 1;
-    let workSum = 0;
     const passes = Math.ceil(Math.log2(n));
 
     for (let pass = 0; pass < passes; pass += 1) {
       for (let index = 0; index < n; index += 1) {
         const sample = ((index * 1103515245 + pass * 12345) % 8380417) | 0;
-        workSum = (workSum + sample * (pass + 1)) | 0;
+        work = (work + sample * (pass + 1)) | 0;
       }
     }
 
-    if (Math.random() < 0.235 + (workSum & 0)) {
-      acceptance = 1;
+    if (Math.random() < MLDSA_ACCEPT_PROBABILITY) {
+      accepted = true;
     }
   }
 
-  return { iterations };
+  return { iterations, work };
 }
 
 function stdev(values: number[]): number {
@@ -527,7 +658,15 @@ export async function benchmarkHAWK(
   mldsaSimulationMs: number;
   mldsaSimulationStdev: number;
   mldsaAvgIterations: number;
-  speedupRatio: number;
+  /**
+   * Ratio of the simulated Falcon-style pass time to this build's HAWK sign
+   * time. This is a within-this-JS-build artifact, NOT a HAWK-vs-Falcon
+   * speedup: this HAWK uses O(n^2) schoolbook multiplication with no NTT,
+   * so it is much slower here than a production HAWK would be, and the
+   * Falcon path is a rough float-cost illustration. The value is exposed for
+   * transparency, not as a performance claim.
+   */
+  illustrativeFalconToHawkTimeRatio: number;
 }> {
   const message = encoder.encode('hawk benchmark message');
 
@@ -581,16 +720,16 @@ export async function benchmarkHAWK(
     mldsaSimulationMs,
     mldsaSimulationStdev: stdev(mldsaSamples),
     mldsaAvgIterations: mean(mldsaIterations),
-    speedupRatio: falconSimulationMs / hawkSignMs,
+    illustrativeFalconToHawkTimeRatio: falconSimulationMs / hawkSignMs,
   };
 }
 
 /**
- * Serialize a HAWK signature using a Golomb-Rice-style encoding for the s1
- * polynomial. Each coefficient is encoded as a sign bit + unary high bits +
- * a low-bits payload. The result is salt-prefixed and the bit stream is
- * packed into whole bytes. This is the same shape the HAWK v1.1 spec uses
- * for its compact signature format, just with simplified parameters.
+ * Serialize a HAWK signature using a Golomb-Rice-style encoding for the
+ * coordinate vector c = (c0, c1). Each coefficient is encoded as a sign bit +
+ * unary high bits + a low-bits payload. The result is salt-prefixed and the
+ * bit stream is packed into whole bytes. This is the same shape the HAWK v1.1
+ * spec uses for its compact signature format, just with simplified parameters.
  */
 export function serializeSignature(signature: HAWKSignature): Uint8Array {
   const params = getParamsForN(signature.n);
@@ -598,8 +737,7 @@ export function serializeSignature(signature: HAWKSignature): Uint8Array {
   const lowBits = 5;
   const bits: number[] = [];
 
-  for (let index = 0; index < signature.s1.length; index += 1) {
-    const value = signature.s1[index];
+  const encodeCoefficient = (value: number): void => {
     const sign = value < 0 ? 1 : 0;
     const magnitude = Math.abs(value);
     const low = magnitude & ((1 << lowBits) - 1);
@@ -613,6 +751,13 @@ export function serializeSignature(signature: HAWKSignature): Uint8Array {
       bits.push(1);
     }
     bits.push(0);
+  };
+
+  for (let index = 0; index < signature.c0.length; index += 1) {
+    encodeCoefficient(signature.c0[index]);
+  }
+  for (let index = 0; index < signature.s1.length; index += 1) {
+    encodeCoefficient(signature.s1[index]);
   }
 
   const byteLength = saltBytes + Math.ceil(bits.length / 8);
@@ -630,5 +775,13 @@ export function serializeSignature(signature: HAWKSignature): Uint8Array {
 }
 
 export function serializePublicKey(publicKey: HAWKPublicKey): Uint8Array {
-  return concatBytes(serializePolynomial(publicKey.q00), serializePolynomial(publicKey.q01));
+  return concatBytes(
+    serializePolynomial(publicKey.q00),
+    serializePolynomial(publicKey.q01),
+    serializePolynomial(publicKey.q11),
+    serializePolynomial(publicKey.basisMod2.f),
+    serializePolynomial(publicKey.basisMod2.g),
+    serializePolynomial(publicKey.basisMod2.F),
+    serializePolynomial(publicKey.basisMod2.G),
+  );
 }

@@ -488,7 +488,7 @@ function gaussianMarkup(): string {
 
 function attemptsMarkup(attempts: SigningState extends infer T ? T extends { attempts: infer A } ? A : never : never): string {
   if (!attempts || (attempts as Array<unknown>).length === 0) {
-    return '<p class="mini-note">No rejected NTRU bases. The first sampled basis solved the toy NTRU equation cleanly.</p>';
+    return '<p class="mini-note">No rejected bases. The first sampled basis had an invertible parity matrix mod 2, so the coset solve was guaranteed.</p>';
   }
 
   const rows = (attempts as Array<{ attempt: number; reason: string }>)
@@ -497,7 +497,7 @@ function attemptsMarkup(attempts: SigningState extends infer T ? T extends { att
 
   return `
     <ol class="attempts-list" aria-label="Rejected key generation attempts">${rows}</ol>
-    <p class="mini-note">Real HAWK keygen retries until the NTRU equation is solvable. Production code rejects many more bases for a wider set of reasons than this educational toy.</p>
+    <p class="mini-note">Real HAWK keygen retries until the NTRU equation is solvable. This demo models that with the parity basis (B mod 2) needing to be invertible so any message coset can be hit; production code rejects bases for more reasons than this.</p>
   `;
 }
 
@@ -510,15 +510,15 @@ function tamperMarkup(): string {
     return `
       <div class="tamper-row">
         <button class="ghost-button" type="button" data-action="tamper-signature" ${state.busyTamper ? 'disabled' : ''} aria-busy="${state.busyTamper}">${state.busyTamper ? 'Tampering...' : 'Flip one coefficient and re-verify'}</button>
-        <span class="mini-note">Verify recovers (f, g) from the signature and checks both an exact polynomial identity and a Euclidean norm bound. Any single-bit edit breaks the identity.</span>
+        <span class="mini-note">Verify checks the signature’s lattice coset against the message target (via the public parity basis) and its length against the public Gram matrix. Any single-coefficient edit breaks the coset match.</span>
       </div>
     `;
   }
 
-  const { coefficient, delta, verified } = state.signing.tampered;
+  const { coefficient, verified } = state.signing.tampered;
   const detail = verified
     ? 'Verification still passes for this perturbation, which is unexpected: please reload and try again.'
-    : `Verification correctly rejects: s1[${coefficient}] shifted by ${delta} fails the basis identity recovery.`;
+    : `Verification correctly rejects: flipping s1[${coefficient}] moves the signature to a different lattice coset, so it no longer matches the message target under the public parity basis.`;
 
   return `
     <div class="tamper-result ${verified ? 'tamper-soft' : 'tamper-hard'}" role="status">
@@ -614,13 +614,13 @@ function signingMarkup(): string {
       </div>
       <div>
         <div class="log-head">
-          <span class="eyebrow">s1 preview (first 12 coefficients)</span>
+          <span class="eyebrow">s1 = c1 preview (first 12 coordinates)</span>
           ${copyButton('s1 preview', state.signing.s1Preview, 's1')}
         </div>
         <p class="mono-block">${escapeHtml(state.signing.s1Preview)}</p>
       </div>
       <div>
-        <span class="eyebrow">Rejected NTRU bases</span>
+        <span class="eyebrow">Rejected bases (parity not invertible mod 2)</span>
         ${attemptsMarkup(state.signing.attempts)}
       </div>
       <div>
@@ -630,7 +630,7 @@ function signingMarkup(): string {
       <div>
         <span class="eyebrow">Export</span>
         ${downloadMarkup()}
-        <p class="mini-note">Signature is the ${termChip('golomb-rice', 'Golomb-Rice')}-encoded s1 prefixed by the salt. Public key is q00 || q01 as little-endian Int32.</p>
+        <p class="mini-note">Signature is the ${termChip('golomb-rice', 'Golomb-Rice')}-encoded coordinate vector (c0, c1) prefixed by the salt. Public key is the Gram matrix q00 || q01 || q11 plus the mod-2 parity basis, as little-endian Int32.</p>
       </div>
     </div>
   `;
@@ -836,26 +836,26 @@ function transparencyMarkup(): string {
         <article class="advice-card accent-green">
           <h3>Exact</h3>
           <ul>
-            <li>HAWK signing returns a salt and an s1 polynomial that pass the public-key consistency check and the norm bound.</li>
-            <li>Verification recovers (f, g), checks the polynomial identity exactly, and applies a real norm bound.</li>
-            <li>The discrete Gaussian CDT walk is constant-shape: same comparisons every call, no early exit.</li>
-            <li>Signature byte counts come from a real Golomb-Rice encoder applied to the generated s1.</li>
+            <li>Keys are a real short lattice basis B = [[f,F],[g,G]] sampled from the integer discrete Gaussian. The public key is its Gram matrix Q = B*B, computed by actual polynomial multiplication and ring adjoints.</li>
+            <li>A signature is a genuine short lattice vector B·c whose coset is bound to the message. Verification uses only the public key: it checks the coset with the public parity basis and measures the length as c*·Q·c via polynomial multiplication.</li>
+            <li>Because verification depends on Q and the parity basis, a signature made with a different key is rejected, and a single flipped coefficient is rejected — both machine-checked in the test suite.</li>
+            <li>The discrete Gaussian CDT walk is constant-shape: same comparisons every call, no early exit. Signature byte counts come from a real Golomb-Rice encoder applied to the coordinate vector.</li>
           </ul>
         </article>
         <article class="advice-card accent-amber">
-          <h3>Simulated</h3>
+          <h3>Simulated / illustrative</h3>
           <ul>
             <li>The Falcon path is a real Box-Muller plus rejection sampler plus a float FFT tree pass. It is NOT the production Falcon sampler, but its critical path is genuinely float-heavy.</li>
-            <li>The ML-DSA path is a stand-in that models the rejection-loop iteration count distribution and reports real timing variance.</li>
-            <li>The keygen failure reasons here are toy NTRU heuristics, not the real f*G - g*F = q solve.</li>
+            <li>The ML-DSA path is a stand-in that models the rejection-loop iteration-count distribution and reports real timing variance.</li>
+            <li>The side-by-side timings are honest wall-clock numbers for THIS build only, not a HAWK-vs-Falcon speedup. This HAWK uses schoolbook multiplication with no NTT, so it is far slower here than a production HAWK would be.</li>
           </ul>
         </article>
         <article class="advice-card accent-purple">
           <h3>Simplified</h3>
           <ul>
-            <li>HAWK signing uses SHA-256-based deterministic expansion of f from the kgseed. Production uses fast PRGs and NTT, which makes production HAWK materially faster than what this JS shows.</li>
-            <li>The hidden Gaussian perturbation in signing is modeled, not the full fast-Fourier sampling tree.</li>
-            <li>Restart probabilities in the UI are illustrative; the real bound depends on the salt distribution and the lattice norm.</li>
+            <li>Signing binds the message through a parity coset and a mod-2 basis solve, and keeps signatures short with a {0,1} coordinate vector. Production HAWK uses a full discrete-Gaussian lattice sampler over the basis; the security intuition (short vector in a message coset) is the same.</li>
+            <li>Keygen models the NTRU solvability condition as “the parity basis is invertible mod 2,” which forces the same retry story without solving the full f·G − g·F = q equation over the integers.</li>
+            <li>The acceptance bound and restart handling are calibrated for the demo; production bounds depend on the full parameter set and the sampler’s tail.</li>
           </ul>
         </article>
       </div>
@@ -941,35 +941,31 @@ function verifyMathMarkup(): string {
     return '<p class="mini-note">Parameter sets did not match, so the basis identity was not checked.</p>';
   }
 
-  const fPreview = previewPolynomial(detail.recoveredF, 8);
-  const gPreview = previewPolynomial(detail.recoveredG, 8);
-  const lhsPreview = previewPolynomial(detail.consistency, 8);
-  const rhsPreview = previewPolynomial(detail.q01, 8);
+  const imagePreview = previewPolynomial(detail.consistency, 8);
+  const targetPreview = previewPolynomial(detail.q01, 8);
 
   return `
     <div class="verify-math" aria-label="Verification math">
       <ol class="verify-steps">
         <li>
-          <span class="verify-label">Recover f = s1 − h</span>
-          <p class="mono-block">[ ${escapeHtml(fPreview)} … ]</p>
+          <span class="verify-label">Recompute the message target h = Hash(pk, salt, m) mod 2</span>
+          <p class="mono-block">h = [ ${escapeHtml(targetPreview)} … ]</p>
         </li>
         <li>
-          <span class="verify-label">Recover g = q00 − f</span>
-          <p class="mono-block">[ ${escapeHtml(gPreview)} … ]</p>
+          <span class="verify-label">Recompute the coset image (B mod 2)·c from the public parity basis</span>
+          <p class="mono-block">(B mod 2)·c = [ ${escapeHtml(imagePreview)} … ]</p>
         </li>
         <li class="${detail.identityHolds ? 'verify-pass' : 'verify-fail'}">
-          <span class="verify-label">Identity check: does f − g equal the public q01?</span>
-          <p class="mono-block">f − g = [ ${escapeHtml(lhsPreview)} … ]</p>
-          <p class="mono-block">q01  = [ ${escapeHtml(rhsPreview)} … ]</p>
-          <p class="verify-verdict">${detail.identityHolds ? '✓ identical — the recovered basis is consistent with the public key' : '✗ mismatch — this is not a valid signature for this key'}</p>
+          <span class="verify-label">Identity check: does the coset image equal the message target?</span>
+          <p class="verify-verdict">${detail.identityHolds ? '✓ the signature’s lattice coset matches this message under this public key' : '✗ mismatch — this signature is not valid for this message and key'}</p>
         </li>
         <li class="${detail.normWithinBound ? 'verify-pass' : 'verify-fail'}">
-          <span class="verify-label">Norm bound: is ‖f‖² + ‖g‖² within the acceptance bound?</span>
+          <span class="verify-label">Length bound: is ‖B·c‖² = c*·Q·c within the acceptance bound?</span>
           <p class="mono-block">${Number.isNaN(detail.totalNorm) ? '—' : detail.totalNorm.toLocaleString()} ${detail.normWithinBound ? '≤' : '>'} ${detail.bound.toLocaleString()}</p>
           <p class="verify-verdict">${detail.normWithinBound ? '✓ short enough — the signer knew the secret short basis' : '✗ too long — rejected'}</p>
         </li>
       </ol>
-      <p class="mini-note">Verification never sees f or g directly. It reconstructs them from the public key plus the signature, then checks an exact polynomial identity and a length bound. A single flipped coefficient breaks the first check — try the tamper test below.</p>
+      <p class="mini-note">Verification never sees the secret short basis. It uses only the public key: it rebuilds the message’s parity target, checks the signature’s lattice coset against it with the public parity basis (via polynomial multiplication mod 2), and measures the lattice point’s length with the public Gram matrix Q = B*B (c*·Q·c). Flipping any coefficient breaks the coset match, and a foreign key has a different Q, so both checks genuinely depend on the lattice — try the tamper test below.</p>
     </div>
   `;
 }
@@ -1249,7 +1245,7 @@ no transcendental functions anywhere</pre>
         <div class="section-heading">
           <span class="eyebrow">Exhibit 3</span>
           <h2 id="exhibit-three-title">HAWK Signing In Action</h2>
-          <p>This educational implementation keeps the public-key consistency check exact while modeling the hidden Gaussian perturbation internally.</p>
+          <p>This educational implementation runs a real lattice round-trip: sign produces a short vector B·c in the message’s coset, and verify checks it against the public Gram matrix and parity basis. Tampering or a foreign key is genuinely rejected.</p>
         </div>
 
         <div class="param-toggle" role="radiogroup" aria-label="HAWK parameter set">
@@ -1262,7 +1258,7 @@ no transcendental functions anywhere</pre>
           <textarea id="message-input" data-role="message-input" rows="3" aria-describedby="message-help">${escapeHtml(state.message)}</textarea>
           <div class="panel-actions">
             <button class="primary-button" type="button" data-action="run-signing" ${state.busySigning ? 'disabled' : ''} aria-busy="${state.busySigning}">${state.busySigning ? 'Signing...' : `Generate HAWK-${state.paramSet} keypair and sign`}</button>
-            <span class="mini-note" id="message-help">Restart odds: about 1 in 200,000 for HAWK-512 and 1 in 400,000 for HAWK-1024. Real keygen retries until the NTRU solve succeeds.</span>
+            <span class="mini-note" id="message-help">Signing hits the message coset in a single mod-2 solve with no rejection loop; it only restarts in the rare case the coset vector exceeds the length bound. Keygen retries when the parity basis is not invertible mod 2 (the demo’s NTRU-solvability condition).</span>
           </div>
         </div>
         ${signingMarkup()}
@@ -1487,6 +1483,7 @@ async function runTamperDemo(): Promise<void> {
     s1Copy[coefficient] += delta;
     const tampered: HAWKSignature = {
       salt: original.salt,
+      c0: Int32Array.from(original.c0),
       s1: s1Copy,
       n: original.n,
     };
@@ -1770,10 +1767,11 @@ async function runSelfTest(): Promise<void> {
 
     const tampered: HAWKSignature = {
       salt: signature.salt,
+      c0: Int32Array.from(signature.c0),
       s1: Int32Array.from(signature.s1),
       n: signature.n,
     };
-    tampered.s1[0] += 1;
+    tampered.s1[0] ^= 1;
     const tamperRejected = !(await hawkVerify(message, tampered, publicKey));
 
     const passed = genuine && tamperRejected;

@@ -115,6 +115,109 @@ export function polyMul(a: Polynomial, b: Polynomial): Polynomial {
 }
 
 /**
+ * Hermitian adjoint (conjugation) in R = Z[X]/(X^n + 1).
+ *
+ * The adjoint a* satisfies <a·u, v> = <u, a*·v> for the coefficient inner
+ * product. Because X^n = -1 we have X^{-1} = -X^{n-1}, so a*(X) = a(X^{-1})
+ * has a*[0] = a[0] and a*[i] = -a[n-i] for i = 1..n-1. This is the ring
+ * conjugation HAWK uses to build its Gram matrix Q = B* B from a basis B.
+ */
+export function polyAdjoint(a: Polynomial): Polynomial {
+  const n = a.length;
+  const out = new Int32Array(n);
+  out[0] = a[0];
+
+  for (let index = 1; index < n; index += 1) {
+    out[index] = -a[n - index];
+  }
+
+  return out;
+}
+
+/**
+ * Reduce every coefficient into {0, 1}. Used for the mod-2 parity basis
+ * that binds a signature's coset to the hashed message target.
+ */
+export function polyMod2(a: Polynomial): Polynomial {
+  const out = new Int32Array(a.length);
+
+  for (let index = 0; index < a.length; index += 1) {
+    out[index] = a[index] & 1;
+  }
+
+  return out;
+}
+
+/**
+ * Addition in (Z/2)[X]/(X^n + 1) (coefficient-wise XOR).
+ */
+export function polyAddMod2(a: Polynomial, b: Polynomial): Polynomial {
+  assertCompatible(a, b);
+  const out = new Int32Array(a.length);
+
+  for (let index = 0; index < a.length; index += 1) {
+    out[index] = (a[index] + b[index]) & 1;
+  }
+
+  return out;
+}
+
+/**
+ * Multiplication in (Z/2)[X]/(X^n + 1): a full negacyclic multiply reduced
+ * mod 2. (Mod 2 the sign folds away, so this is also the cyclic product,
+ * but we keep the negacyclic multiply for consistency with the ring.)
+ */
+export function polyMulMod2(a: Polynomial, b: Polynomial): Polynomial {
+  const product = polyMul(a, b);
+  return polyMod2(product);
+}
+
+/**
+ * Multiplicative inverse in (Z/2)[X]/(X^n + 1), or null if `a` is not a unit.
+ *
+ * Mod 2, X^n + 1 = (X + 1)^n, so the ring is local with maximal ideal (X+1)
+ * and every unit has the form 1 + m with m nilpotent. `a` is a unit iff
+ * a(1) = 1 (odd Hamming weight); then a^{-1} = sum_k m^k with m = a + 1,
+ * a finite sum because m is nilpotent.
+ */
+export function polyInvMod2(a: Polynomial): Polynomial | null {
+  const n = a.length;
+
+  let weight = 0;
+  for (let index = 0; index < n; index += 1) {
+    weight ^= a[index] & 1;
+  }
+  if (weight === 0) {
+    return null;
+  }
+
+  const oneP = new Int32Array(n);
+  oneP[0] = 1;
+
+  // m = a + 1 (mod 2) lies in the maximal ideal and is nilpotent.
+  const m = polyAddMod2(polyMod2(a), oneP);
+
+  let inverse: Polynomial = oneP;
+  let term: Polynomial = oneP;
+  for (let k = 1; k <= n; k += 1) {
+    term = polyMulMod2(term, m);
+    let zero = true;
+    for (let index = 0; index < n; index += 1) {
+      if (term[index] !== 0) {
+        zero = false;
+        break;
+      }
+    }
+    if (zero) {
+      break;
+    }
+    inverse = polyAddMod2(inverse, term);
+  }
+
+  return inverse;
+}
+
+/**
  * Infinity norm of a polynomial (max |coefficient|).
  */
 export function polyInfNorm(p: Polynomial): number {

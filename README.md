@@ -19,11 +19,13 @@ The UI opens with a five-step guided learning path and then walks through six ex
 - The three lattice signatures at a glance, including a full side-by-side comparison matrix
 - What module-LIP means, shown as a short basis versus a bad basis over the same lattice
 - The Gaussian sampling difference between Falcon and HAWK, with a step-through of a single CDT draw that accumulates into a live tally
-- A live HAWK signing walkthrough that shows the verification identity in the open: recover (f, g), check f − g equals the public q01, and check the Euclidean norm bound, with the actual numbers
+- A live HAWK signing walkthrough that shows the verification identity in the open: recompute the message's parity target, check the signature's lattice coset against it with the public parity basis, and check the lattice point's Euclidean length via the public Gram matrix Q = B*B, with the actual numbers
 - A Round 2 standardization roadmap and deployment guidance for real 2026 systems
 - A glossary of every key term plus a four-question self-check that grades entirely in the browser
 
 A self-test runs on page load — a real keygen → sign → verify → tamper-reject round-trip — so the honesty claims are machine-checked, not just asserted. The result shows as a badge in the header.
+
+The signing path is a genuine, integer-only lattice round-trip, not a forced arithmetic identity. Keys are a real short basis B = [[f,F],[g,G]] sampled from the discrete Gaussian; the public key is its Gram matrix Q = B*B computed with actual polynomial multiplication and ring adjoints. A signature is a short lattice vector B·c whose coset is bound to the message, and verification uses only the public key: it checks the coset with the public parity basis (via polynomial multiplication mod 2) and measures the vector's length as c*·Q·c. Because verification depends on Q and the parity basis, a signature made with a different key is rejected and a single flipped coefficient is rejected — both are covered by the test suite (see `verify:phase4`), which also confirms a norm-only forgery that keeps the coset intact is caught by the Gram-matrix bound. What stays simplified (a mod-2 coset solve instead of the full discrete-Gaussian lattice sampler, and schoolbook multiplication instead of the NTT) is disclosed in the in-app honesty panel.
 
 ## When to Use It
 
@@ -96,7 +98,7 @@ npm run build
 npm test
 ```
 
-`npm test` runs the four-phase verification suite (`scripts/verify-phase*.ts`). Phase 4 is the comprehensive gold-standard check: full keygen → sign → verify round-trips for HAWK-512 and HAWK-1024, the exact verification identity, tamper rejection, serialization determinism and sizes, and a chi-square goodness-of-fit test on the discrete Gaussian sampler. CI runs the build and the suite on every push and pull request, and the GitHub Pages deploy is gated on `npm test` so a broken crypto path can never ship.
+`npm test` runs the four-phase verification suite (`scripts/verify-phase*.ts`). Phase 4 is the comprehensive gold-standard check: full keygen → sign → verify round-trips for HAWK-512 and HAWK-1024, the coset verification identity, tamper rejection, wrong-key rejection (a valid signature must fail against a different public key, since verification depends on that key's Gram matrix and parity basis), a norm-only forgery that keeps the coset but inflates the lattice vector (caught by the Gram-matrix bound), serialization determinism and sizes, and a chi-square goodness-of-fit test on the discrete Gaussian sampler. CI runs the build and the suite on every push and pull request, and the GitHub Pages deploy is gated on `npm test` so a broken crypto path can never ship.
 
 The app is static and deploys to GitHub Pages with base path `/crypto-lab-hawk/`.
 

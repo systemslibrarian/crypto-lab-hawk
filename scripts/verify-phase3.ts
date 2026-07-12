@@ -59,7 +59,7 @@ console.log(
     falconSimulationMs: Number(benchmark.falconSimulationMs.toFixed(3)),
     mldsaSimulationMs: Number(benchmark.mldsaSimulationMs.toFixed(3)),
     mldsaAvgIterations: Number(benchmark.mldsaAvgIterations.toFixed(2)),
-    speedupRatio: Number(benchmark.speedupRatio.toFixed(2)),
+    illustrativeFalconToHawkTimeRatio: Number(benchmark.illustrativeFalconToHawkTimeRatio.toFixed(2)),
   }),
 );
 console.log('phase-3 verification passed');

@@ -4,8 +4,15 @@
  * This is the machine-checked backing for the page's "honesty panel" claims.
  * It covers, for both parameter sets:
  *   - full keygen -> sign -> verify round-trips
- *   - the detailed verification identity (recovered f - g === q01)
- *   - tamper rejection across many coefficients
+ *   - the verification identity: the signature's coset image under the public
+ *     parity basis (B mod 2)·c must equal the message's hashed parity target
+ *   - the Gram-matrix norm: ||B c||^2 recomputed as c* Q c from the PUBLIC key
+ *   - tamper rejection across many coefficients (breaks the coset identity)
+ *   - WRONG-KEY rejection: a valid signature must fail against a different
+ *     public key, because verification depends on that key's Gram matrix and
+ *     parity basis, not just on a hash match
+ *   - a norm-only forgery (parity kept, lattice vector inflated) is rejected
+ *     by the Gram-matrix bound
  *   - signature/public-key serialization (determinism + sizes)
  *   - the CDT sampler's distribution via a chi-square goodness-of-fit test
  *   - CDT trace self-consistency (the step-through matches the magnitude)
@@ -48,18 +55,30 @@ async function roundTrip(params: typeof HAWK_512_PARAMS | typeof HAWK_1024_PARAM
   const { signature, restartCount } = await hawkSign(message, privateKey);
   assert(signature.n === params.n, `signature keeps n=${params.n}`);
   assert(signature.s1.length === params.n, `s1 has n coefficients (n=${params.n})`);
+  assert(signature.c0.length === params.n, `c0 has n coefficients (n=${params.n})`);
   assert(restartCount >= 0, `restart count is non-negative (n=${params.n})`);
 
   const detail = await hawkVerifyDetailed(message, signature, publicKey);
   assert(detail.ok, `genuine signature verifies (n=${params.n})`);
-  assert(detail.identityHolds, `recovered basis satisfies the identity (n=${params.n})`);
-  assert(detail.normWithinBound, `recovered basis is within the norm bound (n=${params.n})`);
+  assert(detail.identityHolds, `signature coset matches the message target (n=${params.n})`);
+  assert(detail.normWithinBound, `lattice point is within the Gram-matrix bound (n=${params.n})`);
   assert(detail.totalNorm <= detail.bound, `total norm <= bound (n=${params.n})`);
+  assert(detail.totalNorm > 0, `Gram-matrix norm is a genuine positive length (n=${params.n})`);
 
-  // The recovered consistency polynomial must equal the published q01 exactly.
-  assert(detail.consistency.length === detail.q01.length, `consistency length matches q01 (n=${params.n})`);
+  // The coset image (h0||h1) must be a real parity vector, not trivially zero:
+  // if it were all-zero, the identity check would be vacuous.
+  let targetOnes = 0;
   for (let i = 0; i < detail.q01.length; i += 1) {
-    assert(detail.consistency[i] === detail.q01[i], `consistency[${i}] === q01[${i}] (n=${params.n})`);
+    if (detail.q01[i] !== 0) {
+      targetOnes += 1;
+    }
+  }
+  assert(targetOnes > 0, `hashed parity target is non-trivial (n=${params.n})`);
+
+  // Identity: the recomputed coset image must equal the target coset exactly.
+  assert(detail.consistency.length === detail.q01.length, `coset image length matches target (n=${params.n})`);
+  for (let i = 0; i < detail.q01.length; i += 1) {
+    assert(detail.consistency[i] === detail.q01[i], `coset image[${i}] === target[${i}] (n=${params.n})`);
   }
 
   // Tamper rejection: flipping any one of several coefficients must break it.
@@ -67,10 +86,11 @@ async function roundTrip(params: typeof HAWK_512_PARAMS | typeof HAWK_1024_PARAM
   for (const index of probes) {
     const tampered: HAWKSignature = {
       salt: signature.salt,
+      c0: Int32Array.from(signature.c0),
       s1: Int32Array.from(signature.s1),
       n: signature.n,
     };
-    tampered.s1[index] += index % 2 === 0 ? 1 : -1;
+    tampered.s1[index] ^= 1;
     const stillValid = await hawkVerify(message, tampered, publicKey);
     assert(!stillValid, `tampering s1[${index}] is rejected (n=${params.n})`);
   }
@@ -79,6 +99,42 @@ async function roundTrip(params: typeof HAWK_512_PARAMS | typeof HAWK_1024_PARAM
   const otherMessage = encoder.encode(`different message for n=${params.n}`);
   const otherValid = await hawkVerify(otherMessage, signature, publicKey);
   assert(!otherValid, `signature does not verify a different message (n=${params.n})`);
+
+  // WRONG-KEY REJECTION. This is the test that would fail if signing were not
+  // bound to the lattice: verification must depend on THIS key's Gram matrix
+  // and parity basis. An independently generated keypair signs the same
+  // message; each signature must be rejected against the other public key.
+  const other = await hawkKeygen(params);
+  const otherSig = await hawkSign(message, other.privateKey);
+  assert(
+    !(await hawkVerify(message, signature, other.publicKey)),
+    `signature is rejected against a different public key (n=${params.n})`,
+  );
+  assert(
+    !(await hawkVerify(message, otherSig.signature, publicKey)),
+    `foreign signature is rejected against this public key (n=${params.n})`,
+  );
+  // Sanity: each genuine signature still verifies against its own key.
+  assert(await hawkVerify(message, otherSig.signature, other.publicKey), `foreign signature verifies against its own key (n=${params.n})`);
+
+  // NORM-ONLY FORGERY. Keep the parity coset intact (add an even offset 2e to
+  // both coordinates so B·c stays in the same coset mod 2) but inflate the
+  // lattice vector's length. The coset identity still holds, so ONLY the
+  // Gram-matrix norm bound can catch it — proving that check is non-vacuous.
+  const inflated: HAWKSignature = {
+    salt: signature.salt,
+    c0: Int32Array.from(signature.c0),
+    s1: Int32Array.from(signature.s1),
+    n: signature.n,
+  };
+  for (let i = 0; i < params.n; i += 1) {
+    inflated.c0[i] += 2 * 40;
+    inflated.s1[i] += 2 * 40;
+  }
+  const inflatedDetail = await hawkVerifyDetailed(message, inflated, publicKey);
+  assert(inflatedDetail.identityHolds, `inflated forgery keeps the parity coset (n=${params.n})`);
+  assert(!inflatedDetail.normWithinBound, `inflated forgery overshoots the Gram-matrix bound (n=${params.n})`);
+  assert(!inflatedDetail.ok, `inflated forgery is rejected by the norm bound (n=${params.n})`);
 
   // Serialization: deterministic and correctly sized.
   const sigBytesA = serializeSignature(signature);
@@ -90,7 +146,8 @@ async function roundTrip(params: typeof HAWK_512_PARAMS | typeof HAWK_1024_PARAM
   assert(sigBytesA.length > params.saltBits / 8, `serialized signature carries data beyond the salt (n=${params.n})`);
 
   const pkBytes = serializePublicKey(publicKey);
-  assert(pkBytes.length === params.n * 4 * 2, `public key serializes to 2*n int32 (n=${params.n})`);
+  // q00, q01, q11 plus the four parity-basis polynomials = 7 int32 vectors.
+  assert(pkBytes.length === params.n * 4 * 7, `public key serializes to 7*n int32 (n=${params.n})`);
 }
 
 function distributionTest(): void {
