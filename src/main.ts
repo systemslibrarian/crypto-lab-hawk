@@ -1112,33 +1112,29 @@ function render(): void {
     <div class="sr-only" aria-live="polite" aria-atomic="true">${escapeHtml(state.liveMessage)}</div>
     <main class="shell" id="main-content">
       ${statusMarkup()}
-      <section class="hero" aria-labelledby="hero-title">
-        <div class="hero-copy">
-          <span class="hero-tag">HAWK signature laboratory</span>
-          <h1 id="hero-title">Integer-only lattice signatures, built for the post-Falcon era.</h1>
-          <p class="lede">Browser-based educational demo of HAWK, the only lattice-based scheme still standing in Round 2 of NIST's additional PQ signature process as of April 2026.</p>
-          <div class="hero-actions">
-            <button class="pill-button" type="button" data-action="theme-toggle" aria-pressed="${state.theme === 'light'}" aria-label="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode">Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode</button>
-            <span class="status-badge round-2">Round 2, not standardized</span>
-            <span class="status-badge caution">Educational build only</span>
-            ${selfTestBadgeMarkup()}
-          </div>
+      <header class="cl-hero">
+        <div class="cl-hero-main">
+          <h1 class="cl-hero-title" id="hero-title">HAWK</h1>
+          <p class="cl-hero-sub">Integer-only lattice signatures · module-LIP · NIST PQ Round 2</p>
+          <p class="cl-hero-desc">Sign and verify with HAWK in the browser while you watch its discrete Gaussian CDT sampler walk, the short-vs-bad basis behind module-LIP, and a live speed comparison against Falcon and ML-DSA.</p>
         </div>
-        <aside class="hero-aside">
-          <p class="eyebrow">Why HAWK matters</p>
-          <ul class="hero-list">
-            <li>No floating-point arithmetic</li>
-            <li>No rejection loop in signing</li>
-            <li>Discrete Gaussian sampling over Z via fixed tables</li>
-            <li>Smaller signatures than Falcon at level I</li>
-            <li>Potentially friendlier to FHE and MPC circuits</li>
-          </ul>
-          <div class="hero-live" aria-live="polite" aria-label="Live stats from this session">
-            <p class="eyebrow">Live from this session</p>
-            ${heroLiveStatsMarkup()}
-          </div>
+        <aside class="cl-hero-why" aria-label="Why it matters">
+          <span class="cl-hero-why-label">WHY IT MATTERS</span>
+          <p class="cl-hero-why-text">Signing secret keys leaks through timing and float rounding, and Falcon and ML-DSA both fight that. HAWK's integer-only, no-rejection-loop design gives it a cleaner constant-time story, so understanding it previews where post-quantum signatures are heading.</p>
         </aside>
-      </section>
+      </header>
+      <div class="hero-meta">
+        <div class="hero-actions">
+          <button class="pill-button" type="button" data-action="theme-toggle" aria-pressed="${state.theme === 'light'}" aria-label="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode">Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode</button>
+          <span class="status-badge round-2">Round 2, not standardized</span>
+          <span class="status-badge caution">Educational build only</span>
+          ${selfTestBadgeMarkup()}
+        </div>
+        <div class="hero-live" aria-live="polite" aria-label="Live stats from this session">
+          <p class="eyebrow">Live from this session</p>
+          ${heroLiveStatsMarkup()}
+        </div>
+      </div>
 
       ${learningPathMarkup()}
 
