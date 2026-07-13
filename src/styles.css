@@ -391,6 +391,14 @@ blockquote footer {
   font-size: 1.05rem;
 }
 
+.metric-card .metric-caveat {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.72rem;
+  font-style: italic;
+  color: var(--muted);
+}
+
 .detail-panel {
   margin-top: 18px;
 }
@@ -619,6 +627,80 @@ blockquote footer {
 .hist-grid {
   stroke: var(--line);
   stroke-dasharray: 2 4;
+}
+
+.legend-chip-pending {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.histogram-preview .hist-pmf-line,
+.histogram-preview .hist-pmf-dot {
+  opacity: 0.85;
+}
+
+/* CDT bell-curve companion panel */
+.cdt-bell {
+  margin: 14px 0 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background-color: color-mix(in srgb, var(--cyan) 4%, transparent);
+}
+
+.cdt-bell figcaption {
+  margin-bottom: 6px;
+}
+
+.cdt-bell svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.cdt-bell-bar {
+  fill: var(--cyan);
+  opacity: 0.35;
+}
+
+.cdt-bell-bar-hit {
+  fill: var(--gold);
+  opacity: 1;
+}
+
+.cdt-bell-tail {
+  fill: var(--gold);
+  opacity: 0.08;
+}
+
+.cdt-bell-tick {
+  font-family: "IBM Plex Mono", "Cascadia Code", monospace;
+  font-size: 11px;
+  fill: var(--muted);
+}
+
+.cdt-track-axis {
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+
+.cdt-track-thresh {
+  stroke-width: 2;
+}
+
+.cdt-track-thresh.crossed {
+  stroke: var(--gold);
+}
+
+.cdt-track-thresh.notcrossed {
+  stroke: var(--muted);
+  opacity: 0.5;
+}
+
+.cdt-track-needle {
+  stroke: var(--magenta);
+  stroke-width: 2.5;
+  stroke-linecap: round;
 }
 
 /* Param toggle */
@@ -990,6 +1072,59 @@ blockquote footer {
 .swatch-nearest {
   background-color: var(--green);
   border-radius: 999px;
+}
+
+.lip-target {
+  cursor: grab;
+  stroke: var(--bg, #08111f);
+  stroke-width: 1.5;
+}
+
+.lip-target:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.lip-svg {
+  touch-action: none;
+}
+
+.lip-readout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  align-items: center;
+}
+
+.lip-steps {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  border: 1px solid var(--line);
+}
+
+.lip-steps strong {
+  font-size: 1.1rem;
+}
+
+.lip-steps-easy {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 45%, transparent);
+  background-color: color-mix(in srgb, var(--green) 12%, transparent);
+}
+
+.lip-steps-hard {
+  color: var(--gold);
+  border-color: color-mix(in srgb, var(--gold) 45%, transparent);
+  background-color: color-mix(in srgb, var(--gold) 12%, transparent);
+}
+
+.lip-coeffs {
+  font-size: 0.82rem;
+  color: var(--muted);
 }
 
 /* Download row */

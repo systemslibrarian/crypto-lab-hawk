@@ -236,6 +236,11 @@ type CdtWalkState = {
 
 type LipState = {
   view: 'short' | 'bad';
+  // Hash target in raw lattice-space coordinates (not integer combinations).
+  // The learner drags this; Babai rounding under the active basis snaps it to a
+  // lattice point. Kept in lattice units so both views share one target.
+  targetU: number;
+  targetV: number;
 };
 
 const state: {
@@ -273,7 +278,7 @@ const state: {
   pendingFocusSelector: null,
   cdt: null,
   cdtSamples: [],
-  lip: { view: 'short' },
+  lip: { view: 'short', targetU: 1.3, targetV: 1.7 },
   activeGlossary: null,
   quiz: { answers: {}, score: null },
   selfTest: 'idle',
@@ -358,9 +363,10 @@ function svgHistogram(
   pmf: Array<[number, number]>,
   totalSamples: number,
 ): string {
-  if (histogram.length === 0) {
+  if (histogram.length === 0 && pmf.length === 0) {
     return '<p class="mini-note">No samples yet.</p>';
   }
+  const previewOnly = histogram.length === 0;
 
   const width = 720;
   const height = 220;
@@ -416,10 +422,17 @@ function svgHistogram(
     `;
   }).join('');
 
+  const observedChip = previewOnly
+    ? '<span class="legend-chip legend-chip-pending"><span class="swatch swatch-observed" aria-hidden="true"></span>Observed bars appear after you sample</span>'
+    : `<span class="legend-chip"><span class="swatch swatch-observed" aria-hidden="true"></span>Observed (${totalSamples.toLocaleString()} samples)</span>`;
+  const figLabel = previewOnly
+    ? `Preview of the theoretical discrete Gaussian PMF at sigma ${EXPECTED_SIGMA}; observed bars appear after sampling`
+    : `Observed discrete Gaussian samples versus the theoretical PMF at sigma ${EXPECTED_SIGMA}`;
+
   return `
-    <figure class="histogram-figure" aria-label="Observed discrete Gaussian samples versus the theoretical PMF at sigma ${EXPECTED_SIGMA}">
+    <figure class="histogram-figure ${previewOnly ? 'histogram-preview' : ''}" aria-label="${figLabel}">
       <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img">
-        <title>Observed sample distribution and theoretical PMF</title>
+        <title>${previewOnly ? 'Theoretical discrete Gaussian PMF (preview)' : 'Observed sample distribution and theoretical PMF'}</title>
         <g class="hist-grid-group">${yTicks}</g>
         <g class="hist-bars">${bars}</g>
         <polyline points="${pmfPoints}" class="hist-pmf-line" fill="none"/>
@@ -427,7 +440,7 @@ function svgHistogram(
         <g class="hist-axis-ticks">${xTicks}</g>
       </svg>
       <figcaption class="histogram-caption">
-        <span class="legend-chip"><span class="swatch swatch-observed" aria-hidden="true"></span>Observed (${totalSamples.toLocaleString()} samples)</span>
+        ${observedChip}
         <span class="legend-chip"><span class="swatch swatch-theory" aria-hidden="true"></span>Theoretical PMF at sigma=${EXPECTED_SIGMA}</span>
       </figcaption>
     </figure>
@@ -453,10 +466,16 @@ function schemeDetailMarkup(): string {
 
 function gaussianMarkup(): string {
   if (!state.gaussian) {
+    // Static preview: the theoretical PMF alone (no observed bars yet) so a
+    // skimming learner sees the bell-curve target the sampler is aiming at,
+    // instead of an empty card. The real observed histogram overlays on top
+    // once "Sample both distributions" is pressed.
+    const previewPmf = discreteGaussianPmf(EXPECTED_SIGMA, 6);
     return `
       <div class="status-card muted">
-        <p>Run the sampler to compare HAWK's integer-table lookup against a real Box-Muller plus rejection float sampler of the kind Falcon's signing path is built on.</p>
+        <p>Run the sampler to compare HAWK's integer-table lookup against a real Box-Muller plus rejection float sampler of the kind Falcon's signing path is built on. Below is the theoretical discrete-Gaussian target the observed bars will land on.</p>
       </div>
+      ${svgHistogram([], previewPmf, 1)}
     `;
   }
 
@@ -473,8 +492,9 @@ function gaussianMarkup(): string {
         <strong>${formatMs(state.gaussian.falconSampleMs)}</strong>
       </article>
       <article class="metric-card accent-gold">
-        <span>Float-to-integer ratio</span>
-        <strong>${formatRatio(ratio)}</strong>
+        <span>Sampler shape</span>
+        <strong>float-heavy vs branch-free integer</strong>
+        <span class="metric-caveat">${formatRatio(ratio)} in this build only — not HAWK vs Falcon</span>
       </article>
       <article class="metric-card accent-green">
         <span>Observed variance</span>
@@ -648,6 +668,124 @@ function statusMarkup(): string {
   `;
 }
 
+const TWO_POW_64 = 2n ** 64n;
+
+/**
+ * Synchronized bell-curve panel for the CDT walk. It makes "how many thresholds
+ * the word falls under = magnitude" visually obvious by linking the table
+ * comparisons back to the Gaussian they implement.
+ *
+ * Each threshold T[k] is the discrete-Gaussian TAIL mass P(|X| > k) scaled to
+ * 2^64 (descending). The uniform 64-bit word w picks a horizontal tail
+ * fraction f = w / 2^64. "w < T[k]" means f lands inside the tail beyond
+ * magnitude k, so the count of thresholds crossed IS the magnitude. We draw:
+ *   - top: the real discrete-Gaussian PMF, with the reached |magnitude| bar(s)
+ *     highlighted and the shaded tail region the crossings correspond to;
+ *   - bottom: a probability track from 0..max(T)/2^64 with each visible
+ *     threshold marked and the word's fraction f drawn as a moving needle.
+ */
+function cdtBellPanel(cdt: CdtWalkState): string {
+  const width = 720;
+  const height = 210;
+  const pad = { top: 18, right: 20, bottom: 46, left: 36 };
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+
+  const pmf = discreteGaussianPmf(EXPECTED_SIGMA, 6);
+  const xs = pmf.map(([k]) => k);
+  const xMin = xs[0];
+  const xMax = xs[xs.length - 1];
+  const span = Math.max(1, xMax - xMin);
+  const pmfMax = pmf.reduce((acc, [, p]) => Math.max(acc, p), 0) * 1.12 || 1;
+
+  const xScale = (k: number) => pad.left + ((k - xMin) / span) * plotW;
+  const barW = Math.max(10, plotW / pmf.length - 8);
+
+  // Current magnitude and (once revealed) sign so we can highlight the exact bar.
+  const visible = cdt.visibleSteps;
+  const magSoFar = visible === 0 ? 0 : cdt.trace.steps[visible - 1].magnitudeAfter;
+  const finalMag = cdt.trace.magnitude;
+  const showFinal = visible >= cdt.trace.steps.length;
+  const highlightMag = showFinal ? finalMag : magSoFar;
+  const signed = cdt.revealedSign && cdt.trace.magnitude !== 0;
+  const signedK = cdt.trace.sample;
+
+  const bars = pmf
+    .map(([k, p]) => {
+      const x = xScale(k) - barW / 2;
+      const h = (p / pmfMax) * plotH;
+      const y = pad.top + plotH - h;
+      let cls = 'cdt-bell-bar';
+      if (highlightMag > 0) {
+        if (signed) {
+          if (k === signedK) cls = 'cdt-bell-bar cdt-bell-bar-hit';
+        } else if (Math.abs(k) === highlightMag) {
+          cls = 'cdt-bell-bar cdt-bell-bar-hit';
+        }
+      }
+      return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0, h).toFixed(1)}" rx="2" class="${cls}"><title>k=${k}, P=${(p * 100).toFixed(2)}%</title></rect>`;
+    })
+    .join('');
+
+  // Shade the tail region |k| >= highlightMag+? : we shade bars strictly beyond
+  // the reached magnitude to show "the word sat this far out in the tail".
+  const tailShade = highlightMag > 0
+    ? pmf
+        .filter(([k]) => Math.abs(k) >= highlightMag)
+        .map(([k]) => {
+          const x = xScale(k) - barW / 2;
+          return `<rect x="${x.toFixed(1)}" y="${(pad.top).toFixed(1)}" width="${barW.toFixed(1)}" height="${(plotH).toFixed(1)}" class="cdt-bell-tail"/>`;
+        })
+        .join('')
+    : '';
+
+  const xTicks = pmf
+    .map(([k]) => `<text x="${xScale(k).toFixed(1)}" y="${(pad.top + plotH + 16).toFixed(1)}" text-anchor="middle" class="cdt-bell-tick">${k}</text>`)
+    .join('');
+
+  // Bottom probability track: word fraction vs thresholds crossed so far.
+  const trackY = height - 14;
+  const trackX0 = pad.left;
+  const trackX1 = width - pad.right;
+  const trackW = trackX1 - trackX0;
+  const table = cdt.trace.table;
+  const maxTail = Number(table[0]) / Number(TWO_POW_64); // largest tail prob = P(|X|>0)
+  const f = Number(cdt.trace.randomWord) / Number(TWO_POW_64);
+  const pScale = (prob: number) => trackX0 + (Math.min(prob, maxTail) / maxTail) * trackW;
+
+  const thresholdMarks = table
+    .map((t, index) => {
+      if (index >= visible) return '';
+      const prob = Number(t) / Number(TWO_POW_64);
+      const x = pScale(prob);
+      const crossed = cdt.trace.steps[index]?.isLess;
+      return `<line x1="${x.toFixed(1)}" y1="${(trackY - 10).toFixed(1)}" x2="${x.toFixed(1)}" y2="${(trackY + 10).toFixed(1)}" class="cdt-track-thresh ${crossed ? 'crossed' : 'notcrossed'}"><title>T[${index}] tail P=${(prob * 100).toFixed(2)}%</title></line>`;
+    })
+    .join('');
+
+  const needleX = f <= maxTail ? pScale(f) : trackX1;
+  const needle = `<line x1="${needleX.toFixed(1)}" y1="${(trackY - 14).toFixed(1)}" x2="${needleX.toFixed(1)}" y2="${(trackY + 14).toFixed(1)}" class="cdt-track-needle"/>`;
+  const wordLabel = f > maxTail
+    ? 'word fraction is past every threshold → magnitude 0 (center of the bell)'
+    : `word fraction ${(f * 100).toFixed(2)}% falls under ${highlightMag} threshold${highlightMag === 1 ? '' : 's'} → |magnitude| = ${highlightMag}`;
+
+  return `
+    <figure class="cdt-bell" aria-label="Discrete Gaussian bell curve showing how many thresholds the random word falls under equals its magnitude">
+      <figcaption class="eyebrow">Same draw, on the bell curve</figcaption>
+      <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img">
+        <title>Discrete Gaussian with the reached magnitude highlighted and the word's tail position marked</title>
+        <g class="cdt-bell-tails">${tailShade}</g>
+        <g class="cdt-bell-bars">${bars}</g>
+        <g class="cdt-bell-ticks">${xTicks}</g>
+        <line x1="${trackX0}" y1="${trackY}" x2="${trackX1}" y2="${trackY}" class="cdt-track-axis"/>
+        <g class="cdt-track-thresholds">${thresholdMarks}</g>
+        ${needle}
+      </svg>
+      <p class="mini-note">${wordLabel}. The taller central bars are the common small outputs; the shaded tail shows where this particular word landed. Each threshold you step past is one more tail region the word cleared.</p>
+    </figure>
+  `;
+}
+
 function cdtWalkMarkup(): string {
   const cdt = state.cdt;
   if (!cdt) {
@@ -713,49 +851,144 @@ function cdtWalkMarkup(): string {
       </div>
       <ol class="cdt-steps">${stepCards}</ol>
       ${finalLine}
+      ${cdtBellPanel(cdt)}
       <p class="mini-note">Notice: every draw runs all seven comparisons. There is no early exit. That's why the algorithm has no data-dependent branch on its critical path.</p>
     </div>
   `;
 }
 
-function lipMarkup(): string {
-  const view = state.lip.view;
-  const width = 520;
-  const height = 320;
+// Both bases below span the SAME lattice: every point is an integer
+// combination (2i, 2j) of the short basis. The bad basis is a unimodular
+// (determinant-preserving) recombination of the short one, so it generates the
+// identical point set — that is the whole point of LIP.
+//   short = [[2,0],[0,2]]           det = 4
+//   bad   = [[2,0],[6,2]] = short · [[1,0],[3,1]]  (det of the transform = 1)
+const LIP_SHORT_BASIS: [[number, number], [number, number]] = [[2, 0], [0, 2]];
+const LIP_BAD_BASIS: [[number, number], [number, number]] = [[2, 0], [6, 2]];
+
+const LIP_GEOMETRY = { width: 520, height: 320, scale: 30 } as const;
+
+function lipActiveBasis(): [[number, number], [number, number]] {
+  return state.lip.view === 'short' ? LIP_SHORT_BASIS : LIP_BAD_BASIS;
+}
+
+/**
+ * Greedy Babai rounding: express the raw target in the active basis, round each
+ * coordinate to the nearest integer, and reconstruct the lattice point. The
+ * ROUNDED integer coordinates are exactly the "steps" the exhibit animates:
+ * step k adds coeff[k] copies of basis vector k, starting from the origin.
+ *
+ * Under an almost-orthogonal (short) basis this lands on the genuinely nearest
+ * lattice point in 2-3 small moves. Under a long skewed basis the same target
+ * rounds to large coefficients that overshoot, so the walk is long and the
+ * point it reaches is farther away — the LIP intuition, made mechanical.
+ */
+function babaiRound(
+  basis: [[number, number], [number, number]],
+  tu: number,
+  tv: number,
+): { coeffs: [number, number]; point: [number, number] } {
+  const [b0, b1] = basis;
+  // 2x2 inverse of [b0 | b1] (columns are the basis vectors).
+  const det = b0[0] * b1[1] - b1[0] * b0[1];
+  const c0raw = (b1[1] * tu - b1[0] * tv) / det;
+  const c1raw = (-b0[1] * tu + b0[0] * tv) / det;
+  const c0 = Math.round(c0raw);
+  const c1 = Math.round(c1raw);
+  const px = c0 * b0[0] + c1 * b1[0];
+  const py = c0 * b0[1] + c1 * b1[1];
+  return { coeffs: [c0, c1], point: [px, py] };
+}
+
+// Inner SVG content only, so drag can repaint without a full page re-render.
+function lipSvgInner(): string {
+  const { width, height, scale } = LIP_GEOMETRY;
   const cx = width / 2;
   const cy = height / 2;
-  const scale = 30;
+  const toX = (lx: number) => cx + lx * scale;
+  const toY = (ly: number) => cy - ly * scale;
 
-  const shortBasis: [number, number][] = [[2, 0], [0, 2]];
-  const badBasis: [number, number][] = [[6, 1], [5, 2]];
-  const basis = view === 'short' ? shortBasis : badBasis;
-
-  const lattice: Array<{ x: number; y: number }> = [];
-  for (let a = -8; a <= 8; a += 1) {
-    for (let b = -8; b <= 8; b += 1) {
-      const lx = a * 2 + b * 0;
-      const ly = a * 0 + b * 2;
-      if (Math.abs(lx) <= 8 && Math.abs(ly) <= 6) {
-        lattice.push({ x: cx + lx * scale, y: cy - ly * scale });
-      }
+  // Shared dot grid: identical under both views because both bases span it.
+  const dots: string[] = [];
+  for (let i = -4; i <= 4; i += 1) {
+    for (let j = -3; j <= 3; j += 1) {
+      dots.push(`<circle cx="${toX(i * 2)}" cy="${toY(j * 2)}" r="3" class="lip-lattice-dot"/>`);
     }
   }
 
-  const target = { x: cx + 1.3 * scale, y: cy - 1.7 * scale };
-  const nearestLattice = { x: cx + 2 * scale, y: cy - 2 * scale };
-
+  const basis = lipActiveBasis();
   const basisVectors = basis
     .map(([vx, vy], index) => {
-      const endX = cx + vx * scale;
-      const endY = cy - vy * scale;
       const color = index === 0 ? 'var(--cyan)' : 'var(--gold)';
-      return `<line x1="${cx}" y1="${cy}" x2="${endX}" y2="${endY}" stroke="${color}" stroke-width="3" marker-end="url(#lipArrow)"/>`;
+      return `<line x1="${toX(0)}" y1="${toY(0)}" x2="${toX(vx)}" y2="${toY(vy)}" stroke="${color}" stroke-width="3" marker-end="url(#lipArrow)"/>`;
     })
     .join('');
 
-  const dots = lattice
-    .map(({ x, y }) => `<circle cx="${x}" cy="${y}" r="3" class="lip-lattice-dot"/>`)
-    .join('');
+  const tu = state.lip.targetU;
+  const tv = state.lip.targetV;
+  const { coeffs, point } = babaiRound(basis, tu, tv);
+
+  // Animated Babai walk: origin -> +coeff0·b0 -> +coeff1·b1 = nearest point.
+  // We draw one arrow per NON-ZERO coefficient direction, and if a coefficient
+  // has magnitude > 1 we draw it as that many unit-vector segments so the
+  // "long overshooting combination" of the bad basis is visible as many hops.
+  const walkArrows: string[] = [];
+  let wx = 0;
+  let wy = 0;
+  const order: Array<0 | 1> = [0, 1];
+  for (const k of order) {
+    const c = coeffs[k];
+    if (c === 0) continue;
+    const sign = c > 0 ? 1 : -1;
+    const steps = Math.abs(c);
+    const [bx, by] = basis[k];
+    const stepColor = k === 0 ? 'var(--cyan)' : 'var(--gold)';
+    for (let s = 0; s < steps; s += 1) {
+      const nx = wx + sign * bx;
+      const ny = wy + sign * by;
+      walkArrows.push(
+        `<line x1="${toX(wx)}" y1="${toY(wy)}" x2="${toX(nx)}" y2="${toY(ny)}" stroke="${stepColor}" stroke-width="2.5" opacity="0.9" marker-end="url(#lipStepArrow)"/>`,
+      );
+      wx = nx;
+      wy = ny;
+    }
+  }
+
+  const targetX = toX(tu);
+  const targetY = toY(tv);
+  const nearestX = toX(point[0]);
+  const nearestY = toY(point[1]);
+
+  return `
+    <defs>
+      <marker id="lipArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+      </marker>
+      <marker id="lipStepArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+        <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+      </marker>
+    </defs>
+    <g class="lip-grid">${dots}</g>
+    <g class="lip-walk">${walkArrows}</g>
+    <g class="lip-basis">${basisVectors}</g>
+    <line x1="${nearestX}" y1="${nearestY}" x2="${targetX}" y2="${targetY}" stroke="var(--magenta)" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.7"/>
+    <circle cx="${nearestX}" cy="${nearestY}" r="7" class="lip-nearest"/>
+    <circle cx="${targetX}" cy="${targetY}" r="7" class="lip-target" tabindex="0" role="slider" aria-label="Hash target position, drag or use arrow keys to move" aria-valuetext="target at ${tu.toFixed(1)}, ${tv.toFixed(1)} in lattice units"/>
+  `;
+}
+
+function lipMarkup(): string {
+  const view = state.lip.view;
+  const { width, height } = LIP_GEOMETRY;
+  const basis = lipActiveBasis();
+  const { coeffs, point } = babaiRound(basis, state.lip.targetU, state.lip.targetV);
+  const stepCount = Math.abs(coeffs[0]) + Math.abs(coeffs[1]);
+
+  const coeffText = `${coeffs[0]}·(${basis[0][0]},${basis[0][1]}) ${coeffs[1] < 0 ? '−' : '+'} ${Math.abs(coeffs[1])}·(${basis[1][0]},${basis[1][1]})`;
+
+  const note = view === 'short'
+    ? 'The short basis is almost-orthogonal, so rounding the hash target to the nearest lattice point takes just a couple of small steps — and it lands on the genuinely closest point. This is what HAWK signs with.'
+    : 'This is the SAME lattice (identical dots) described by long, skewed vectors. Rounding the same target now needs many long steps that overshoot, and it can miss the truly nearest point. Recovering the short basis from this bad one is the module-LIP assumption HAWK rests on.';
 
   return `
     <div class="lip-shell">
@@ -763,25 +996,21 @@ function lipMarkup(): string {
         <button type="button" role="radio" aria-checked="${view === 'short'}" data-lip="short" class="${view === 'short' ? 'active' : ''}">Short basis (secret)</button>
         <button type="button" role="radio" aria-checked="${view === 'bad'}" data-lip="bad" class="${view === 'bad' ? 'active' : ''}">Bad basis (public)</button>
       </div>
-      <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" class="lip-svg" role="img" aria-label="Two-dimensional lattice with ${view === 'short' ? 'short' : 'long'} basis vectors">
-        <defs>
-          <marker id="lipArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
-          </marker>
-        </defs>
-        <g class="lip-grid">${dots}</g>
-        <g class="lip-basis">${basisVectors}</g>
-        <line x1="${cx}" y1="${cy}" x2="${target.x}" y2="${target.y}" stroke="var(--magenta)" stroke-width="2" stroke-dasharray="4 3"/>
-        <circle cx="${target.x}" cy="${target.y}" r="6" class="lip-target"/>
-        <circle cx="${nearestLattice.x}" cy="${nearestLattice.y}" r="6" class="lip-nearest"/>
+      <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" class="lip-svg" data-lip-svg role="group" aria-label="Two-dimensional lattice with ${view === 'short' ? 'short' : 'long'} basis vectors; drag the hash target to watch Babai rounding walk to the nearest lattice point">
+        ${lipSvgInner()}
       </svg>
+      <div class="lip-readout" role="status" aria-live="polite">
+        <span class="lip-steps ${view === 'short' ? 'lip-steps-easy' : 'lip-steps-hard'}"><strong>${stepCount}</strong> basis ${stepCount === 1 ? 'step' : 'steps'} to the nearest point</span>
+        <span class="lip-coeffs mono-block">nearest = ${coeffText} = (${point[0]}, ${point[1]})</span>
+      </div>
       <div class="lip-legend">
         <span><span class="swatch swatch-short" aria-hidden="true"></span>Basis vector 1</span>
         <span><span class="swatch swatch-long" aria-hidden="true"></span>Basis vector 2</span>
-        <span><span class="swatch swatch-target" aria-hidden="true"></span>Hash target</span>
+        <span><span class="swatch swatch-target" aria-hidden="true"></span>Hash target (drag me)</span>
         <span><span class="swatch swatch-nearest" aria-hidden="true"></span>Nearest lattice point</span>
       </div>
-      <p class="mini-note">${view === 'short' ? 'The short basis spans the same lattice but with almost-orthogonal vectors. Rounding the hash target to the nearest lattice point is easy: walk a few small basis steps. This is what HAWK signs with.' : 'The bad basis spans the same lattice with long skewed vectors. The lattice points are identical, but finding the nearest one from the same target now requires much longer combinations. This is the public basis. Recovering the short basis from the bad one is the LIP assumption.'}</p>
+      <p class="mini-note">${note}</p>
+      <p class="mini-note">Drag the magenta target (or focus it and use the arrow keys), then flip between the two bases: the dots never move — they are one lattice — but the number of steps the greedy walk needs jumps when the basis gets long and skewed.</p>
     </div>
   `;
 }
@@ -809,8 +1038,7 @@ function heroLiveStatsMarkup(): string {
   }
 
   if (state.gaussian) {
-    const ratio = state.gaussian.falconSampleMs / Math.max(state.gaussian.hawkSampleMs, 0.0001);
-    items.push({ label: 'Float vs integer Gaussian', value: formatRatio(ratio) });
+    items.push({ label: 'Gaussian sampler', value: 'float-heavy vs branch-free' });
   }
 
   if (items.length === 0) {
@@ -1624,10 +1852,19 @@ function bindEvents(): void {
     button.addEventListener('click', () => {
       const view = button.dataset.lip as 'short' | 'bad';
       state.lip.view = view;
-      setLiveMessage(view === 'short' ? 'Short basis view: HAWK signs with this.' : 'Bad basis view: this is the public information.');
+      const basis = lipActiveBasis();
+      const { coeffs } = babaiRound(basis, state.lip.targetU, state.lip.targetV);
+      const steps = Math.abs(coeffs[0]) + Math.abs(coeffs[1]);
+      setLiveMessage(
+        view === 'short'
+          ? `Short basis view: HAWK signs with this. Greedy rounding reaches the nearest point in ${steps} steps.`
+          : `Bad basis view: this is the public information. The same target now needs ${steps} steps.`,
+      );
       render();
     });
   });
+
+  bindLipInteractions();
 
   document.querySelector<HTMLButtonElement>('[data-action="download-sig"]')?.addEventListener('click', () => {
     if (!state.signing) {
@@ -1721,6 +1958,108 @@ function recordCdtSample(): void {
   state.cdtSamples.push(state.cdt.trace.sample);
 }
 
+/** Repaint only the LIP SVG interior + step readout (used during a live drag). */
+function refreshLipSvg(): void {
+  const svg = document.querySelector<SVGSVGElement>('[data-lip-svg]');
+  if (svg) {
+    svg.innerHTML = lipSvgInner();
+  }
+  const readout = document.querySelector<HTMLElement>('.lip-readout');
+  if (readout) {
+    const basis = lipActiveBasis();
+    const { coeffs, point } = babaiRound(basis, state.lip.targetU, state.lip.targetV);
+    const stepCount = Math.abs(coeffs[0]) + Math.abs(coeffs[1]);
+    const coeffText = `${coeffs[0]}·(${basis[0][0]},${basis[0][1]}) ${coeffs[1] < 0 ? '−' : '+'} ${Math.abs(coeffs[1])}·(${basis[1][0]},${basis[1][1]})`;
+    readout.innerHTML = `
+      <span class="lip-steps ${state.lip.view === 'short' ? 'lip-steps-easy' : 'lip-steps-hard'}"><strong>${stepCount}</strong> basis ${stepCount === 1 ? 'step' : 'steps'} to the nearest point</span>
+      <span class="lip-coeffs mono-block">nearest = ${coeffText} = (${point[0]}, ${point[1]})</span>
+    `;
+  }
+}
+
+/** Clamp the raw target to the drawn window so it never leaves the plot. */
+function clampLipTarget(u: number, v: number): [number, number] {
+  return [Math.max(-8, Math.min(8, u)), Math.max(-6, Math.min(6, v))];
+}
+
+function bindLipInteractions(): void {
+  const svg = document.querySelector<SVGSVGElement>('[data-lip-svg]');
+  if (!svg) {
+    return;
+  }
+  const { width, height, scale } = LIP_GEOMETRY;
+  const cx = width / 2;
+  const cy = height / 2;
+
+  // Map a client pointer position to raw lattice-space (u, v) coordinates.
+  const toLattice = (clientX: number, clientY: number): [number, number] => {
+    const rect = svg.getBoundingClientRect();
+    const svgX = ((clientX - rect.left) / rect.width) * width;
+    const svgY = ((clientY - rect.top) / rect.height) * height;
+    const u = (svgX - cx) / scale;
+    const v = (cy - svgY) / scale;
+    return clampLipTarget(u, v);
+  };
+
+  let dragging = false;
+
+  const startDrag = (event: PointerEvent) => {
+    // Only start when grabbing near the target handle or anywhere on the plot.
+    dragging = true;
+    const [u, v] = toLattice(event.clientX, event.clientY);
+    state.lip.targetU = u;
+    state.lip.targetV = v;
+    refreshLipSvg();
+    svg.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  };
+
+  svg.addEventListener('pointerdown', startDrag);
+  svg.addEventListener('pointermove', (event) => {
+    if (!dragging) return;
+    const [u, v] = toLattice(event.clientX, event.clientY);
+    state.lip.targetU = u;
+    state.lip.targetV = v;
+    refreshLipSvg();
+  });
+  const endDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    // Sync the live-region note + accessible name via a full render.
+    const basis = lipActiveBasis();
+    const { coeffs } = babaiRound(basis, state.lip.targetU, state.lip.targetV);
+    const steps = Math.abs(coeffs[0]) + Math.abs(coeffs[1]);
+    setLiveMessage(`Hash target moved. Nearest lattice point reached in ${steps} basis ${steps === 1 ? 'step' : 'steps'} under the ${state.lip.view} basis.`);
+    render();
+  };
+  svg.addEventListener('pointerup', endDrag);
+  svg.addEventListener('pointercancel', endDrag);
+
+  // Keyboard control on the target handle (WCAG: draggable must have a keyboard
+  // equivalent). Arrow keys nudge by half a lattice unit.
+  const handle = svg.querySelector<SVGCircleElement>('.lip-target');
+  handle?.addEventListener('keydown', (event) => {
+    const key = (event as KeyboardEvent).key;
+    let du = 0;
+    let dv = 0;
+    if (key === 'ArrowLeft') du = -0.5;
+    else if (key === 'ArrowRight') du = 0.5;
+    else if (key === 'ArrowUp') dv = 0.5;
+    else if (key === 'ArrowDown') dv = -0.5;
+    else return;
+    event.preventDefault();
+    const [u, v] = clampLipTarget(state.lip.targetU + du, state.lip.targetV + dv);
+    state.lip.targetU = u;
+    state.lip.targetV = v;
+    const basis = lipActiveBasis();
+    const { coeffs } = babaiRound(basis, u, v);
+    const steps = Math.abs(coeffs[0]) + Math.abs(coeffs[1]);
+    setLiveMessage(`Target at ${u.toFixed(1)}, ${v.toFixed(1)}. Nearest point in ${steps} basis ${steps === 1 ? 'step' : 'steps'}.`);
+    setPendingFocus('.lip-target');
+    render();
+  });
+}
+
 function prefersReducedMotion(): boolean {
   return globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 }
@@ -1794,6 +2133,18 @@ function downloadBlob(filename: string, data: Uint8Array): void {
   document.body.removeChild(anchor);
   URL.revokeObjectURL(url);
 }
+
+// Pre-seed a real, fully-walked CDT draw so the exhibit shows a worked example
+// on load instead of an empty status card. This is a genuine in-browser draw
+// from the real CDT (not hardcoded); the learner can replace it with "New
+// random draw" at any time. We do NOT count it as a sample until the learner
+// interacts, to keep the aggregate histogram honest.
+state.cdt = {
+  trace: traceDiscreteGaussian(DISCRETE_GAUSSIAN_TABLE_T1),
+  visibleSteps: DISCRETE_GAUSSIAN_TABLE_T1.length,
+  revealedSign: true,
+  counted: true,
+};
 
 render();
 void runSelfTest();

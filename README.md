@@ -17,8 +17,8 @@ The emphasis is on HAWK's architectural differences from Falcon:
 The UI opens with a five-step guided learning path and then walks through six exhibits:
 
 - The three lattice signatures at a glance, including a full side-by-side comparison matrix
-- What module-LIP means, shown as a short basis versus a bad basis over the same lattice
-- The Gaussian sampling difference between Falcon and HAWK, with a step-through of a single CDT draw that accumulates into a live tally
+- What module-LIP means, shown as a short basis versus a bad basis over the *same* lattice: both bases are unimodular recombinations (determinant 4) that render the identical dot grid, and a draggable hash target animates greedy Babai rounding as basis-step arrows from the origin, counting the steps on screen so the short-basis-is-easy / bad-basis-is-hard claim is something you discover by dragging rather than read
+- The Gaussian sampling difference between Falcon and HAWK, with a step-through of a single CDT draw (pre-seeded with a worked example on load) that accumulates into a live tally, plus a synchronized bell-curve panel that marks where the random word lands on the discrete Gaussian and shades the tail regions the crossed thresholds correspond to, making "how many thresholds it falls under = magnitude" visually obvious
 - A live HAWK signing walkthrough that shows the verification identity in the open: recompute the message's parity target, check the signature's lattice coset against it with the public parity basis, and check the lattice point's Euclidean length via the public Gram matrix Q = B*B, with the actual numbers
 - A Round 2 standardization roadmap and deployment guidance for real 2026 systems
 - A glossary of every key term plus a four-question self-check that grades entirely in the browser
