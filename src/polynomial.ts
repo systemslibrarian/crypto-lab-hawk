@@ -5,30 +5,33 @@
 
 export type Polynomial = Int32Array;
 
+// Sizes and salt lengths are the HAWK v1.1 specification values (Table 4).
+// Unlike Falcon, HAWK has no prime modulus in its ring: it works over Z with
+// q = 1. Falcon's q = 12289 does not apply here.
 export const HAWK_256_PARAMS = {
   n: 256,
-  q: 12289,
-  signatureBytes: 252,
-  publicKeyBytes: 512,
-  saltBits: 96,
+  q: 1,
+  signatureBytes: 249,
+  publicKeyBytes: 450,
+  saltBits: 112,
   securityLevel: 'Challenge',
 } as const;
 
 export const HAWK_512_PARAMS = {
   n: 512,
-  q: 12289,
+  q: 1,
   signatureBytes: 555,
   publicKeyBytes: 1024,
-  saltBits: 112,
+  saltBits: 192,
   securityLevel: 'NIST-I',
 } as const;
 
 export const HAWK_1024_PARAMS = {
   n: 1024,
-  q: 12289,
+  q: 1,
   signatureBytes: 1221,
-  publicKeyBytes: 2560,
-  saltBits: 192,
+  publicKeyBytes: 2440,
+  saltBits: 320,
   securityLevel: 'NIST-V',
 } as const;
 
