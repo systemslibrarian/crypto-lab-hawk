@@ -599,19 +599,19 @@ function signingMarkup(): string {
 
     <section class="bench-strip" aria-label="Side-by-side benchmark across the three schemes">
       <article class="bench-card accent-cyan">
-        <h4>HAWK</h4>
+        <h3>HAWK</h3>
         <p class="bench-row">Sign mean <strong>${formatMs(benchmark.hawkSignMs)}</strong></p>
         <p class="bench-row">Stdev <strong>${formatMs(benchmark.hawkSignStdev)}</strong></p>
         <p class="bench-row">Verify mean <strong>${formatMs(benchmark.hawkVerifyMs)}</strong></p>
       </article>
       <article class="bench-card accent-amber">
-        <h4>Falcon-style (simulated)</h4>
+        <h3>Falcon-style (simulated)</h3>
         <p class="bench-row">FFS pass <strong>${formatMs(benchmark.falconSimulationMs)}</strong></p>
         <p class="bench-row">Stdev <strong>${formatMs(benchmark.falconSimulationStdev)}</strong></p>
         <p class="bench-row">Critical-path floats <strong>yes</strong></p>
       </article>
       <article class="bench-card accent-magenta">
-        <h4>ML-DSA-style (simulated)</h4>
+        <h3>ML-DSA-style (simulated)</h3>
         <p class="bench-row">Loop mean <strong>${formatMs(benchmark.mldsaSimulationMs)}</strong></p>
         <p class="bench-row">Stdev <strong>${formatMs(benchmark.mldsaSimulationStdev)}</strong></p>
         <p class="bench-row">Avg iterations <strong>${benchmark.mldsaAvgIterations.toFixed(2)}</strong></p>
@@ -973,7 +973,7 @@ function lipSvgInner(): string {
     <g class="lip-basis">${basisVectors}</g>
     <line x1="${nearestX}" y1="${nearestY}" x2="${targetX}" y2="${targetY}" stroke="var(--magenta)" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.7"/>
     <circle cx="${nearestX}" cy="${nearestY}" r="7" class="lip-nearest"/>
-    <circle cx="${targetX}" cy="${targetY}" r="7" class="lip-target" tabindex="0" role="slider" aria-label="Hash target position, drag or use arrow keys to move" aria-valuetext="target at ${tu.toFixed(1)}, ${tv.toFixed(1)} in lattice units"/>
+    <circle cx="${targetX}" cy="${targetY}" r="7" class="lip-target" tabindex="0" role="slider" aria-label="Hash target position, drag or use arrow keys to move" aria-valuemin="-8" aria-valuemax="8" aria-valuenow="${tu.toFixed(1)}" aria-valuetext="target at ${tu.toFixed(1)}, ${tv.toFixed(1)} in lattice units"/>
   `;
 }
 
