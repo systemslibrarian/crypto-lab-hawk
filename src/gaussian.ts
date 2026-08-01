@@ -4,9 +4,20 @@ import { type Polynomial } from './polynomial';
  * Discrete Gaussian sampler over the integer lattice Z.
  * THIS IS THE KEY DIFFERENCE FROM FALCON.
  *
- * HAWK uses two fixed precomputed lookup tables:
- *   - T_0: for sampling during key generation
- *   - T_1: for sampling during signing
+ * HAWK uses two fixed precomputed lookup tables, T_0 and T_1, and the CDT walk
+ * below is a faithful model of how they are used: one uniform word, a fixed
+ * number of threshold comparisons, no early exit, no floating point.
+ *
+ * WHERE THIS BUILD DIVERGES: in this build only T_0 is on a real cryptographic
+ * path — `sampleBasis` in hawk.ts uses it to draw f, g, F, G during key
+ * generation. T_1 is NOT reached by `hawkSign`. This build's signing path
+ * substitutes a mod-2 linear solve for HAWK's Gaussian coset sampler (see the
+ * honesty note on `hawkSign`), so there is no signing-time Gaussian draw for
+ * T_1 to serve. T_1 is therefore exhibited standalone in Exhibit 2 — the
+ * histogram, the timing race against the Falcon-style sampler, and the
+ * step-through walk are all real samples from a real CDT, they are simply not
+ * feeding this build's signatures. Do not read Exhibit 2 as a trace of what
+ * happened when you pressed "sign".
  */
 
 export const EXPECTED_SIGMA = 1.425;

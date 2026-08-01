@@ -41,7 +41,8 @@ assert(benchmark.hawkSignStdev >= 0, 'HAWK signing stdev must be non-negative.')
 assert(benchmark.mldsaSimulationStdev >= 0, 'ML-DSA simulation stdev must be non-negative.');
 // The structural difference between the schemes is deterministic and is what
 // matters pedagogically: ML-DSA's rejection loop runs more than one iteration
-// on average, while HAWK has no rejection loop on its signing path. Asserting
+// on average, while HAWK has no accept/reject step inside its sampler and
+// restarts only when the coset vector overshoots the length bound. Asserting
 // on iteration structure rather than wall-clock keeps this check meaningful
 // without being flaky on fast or noisy CI runners.
 assert(

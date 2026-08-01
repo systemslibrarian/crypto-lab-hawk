@@ -12,6 +12,8 @@ import {
 } from './gaussian';
 import {
   benchmarkHAWK,
+  defaultVerificationBound,
+  hawkForgeFromPublicKey,
   hawkKeygen,
   hawkSign,
   hawkVerify,
@@ -52,7 +54,16 @@ type SigningState = {
   publicKeyBytes: number;
   attempts: Array<{ attempt: number; reason: string }>;
   paramSet: ParamKey;
+  bound: number;
   tampered: { verified: boolean; coefficient: number; delta: number } | null;
+  forged: {
+    verified: boolean;
+    identityHolds: boolean;
+    norm: number;
+    bound: number;
+    forgeTimeMs: number;
+    matchesGenuineCoordinates: boolean;
+  } | null;
   verifyDetail: HAWKVerifyDetail;
   signature: HAWKSignature;
   publicKey: HAWKPublicKey;
@@ -89,7 +100,8 @@ const schemeCopy: Record<SchemeKey, { title: string; accent: string; summary: st
     bullets: [
       'Hard problem: NTRU-SIS',
       'Requires floating-point Gaussian sampling over a lattice',
-      'No rejection loop, but constant-time hardening is difficult',
+      'No outer restart loop, but SamplerZ rejects internally',
+      'Constant-time hardening is difficult',
       'Currently progressing toward FIPS 206',
     ],
   },
@@ -107,11 +119,11 @@ const schemeCopy: Record<SchemeKey, { title: string; accent: string; summary: st
   hawk: {
     title: 'HAWK',
     accent: 'cyan',
-    summary: 'The research frontier: integer-only Gaussian sampling over Z, no rejection sampling, and simpler constant-time structure.',
+    summary: 'The research frontier: integer-only Gaussian sampling over Z, no accept/reject inside the sampler, and simpler constant-time structure.',
     bullets: [
       'Hard problem: smLIP + omSVP',
       'No floating point anywhere in the core path',
-      'No rejection loop in signing',
+      'No accept/reject inside the sampler; signing restarts only on the norm bound',
       'NIST On-Ramp Round 2, still not standardized',
     ],
   },
@@ -142,7 +154,7 @@ const learningPath: LearningStep[] = [
   { href: '#exhibit-lip', index: '02', title: 'See the hard problem', blurb: 'Why a short basis is secret and a long one is public.' },
   { href: '#exhibit-gaussian', index: '03', title: 'Watch the sampler', blurb: 'Integer table walk versus floating-point rejection.' },
   { href: '#exhibit-signing', index: '04', title: 'Sign and verify', blurb: 'A full round-trip with the identity shown in the open.' },
-  { href: '#glossary', index: '05', title: 'Check your understanding', blurb: 'Glossary of terms, then a four-question self-check.' },
+  { href: '#glossary', index: '05', title: 'Check your understanding', blurb: 'Glossary of terms, then a five-question self-check.' },
 ];
 
 type CompareRow = { dimension: string; falcon: string; mldsa: string; hawk: string };
@@ -153,7 +165,8 @@ const compareRows: CompareRow[] = [
   { dimension: 'Public key (NIST-I)', falcon: '897 B', mldsa: '1,312 B', hawk: '1,024 B' },
   { dimension: 'Core arithmetic', falcon: 'Floating-point', mldsa: 'Integer', hawk: 'Integer only' },
   { dimension: 'Signing sampler', falcon: 'Float Gaussian over a lattice', mldsa: 'Uniform + rejection', hawk: 'Integer Gaussian over Z (CDT)' },
-  { dimension: 'Rejection loop?', falcon: 'No', mldsa: 'Yes (≈3–5 iterations)', hawk: 'No' },
+  { dimension: 'Outer signing restart loop?', falcon: 'No', mldsa: 'Yes (≈3–5 iterations)', hawk: 'Rare (norm bound only)' },
+  { dimension: 'Rejection inside the sampler?', falcon: 'Yes (SamplerZ accept/reject)', mldsa: 'Yes (that is the outer loop)', hawk: 'No (fixed table walk)' },
   { dimension: 'Constant-time posture', falcon: 'Hard to achieve', mldsa: 'Mixed', hawk: 'Designed in' },
   { dimension: 'Standardization', falcon: 'FIPS 206 (in progress)', mldsa: 'FIPS 204 (standard)', hawk: 'Round 2 on-ramp' },
 ];
@@ -165,7 +178,7 @@ const glossary: GlossaryTerm[] = [
   { slug: 'ntru', term: 'NTRU', short: 'A ring-based lattice family; Falcon’s keys solve an NTRU equation.', full: 'NTRU is a family of lattice problems built over polynomial rings. Falcon’s key generation must solve the NTRU equation f·G − g·F = q, which can fail for a sampled basis and force a retry. HAWK reuses NTRU-style structure but leans on the Lattice Isomorphism Problem for its security.' },
   { slug: 'discrete-gaussian', term: 'Discrete Gaussian', short: 'A bell-curve distribution sampled over the integers instead of the reals.', full: 'A discrete Gaussian assigns each integer k a probability proportional to exp(−k² / 2σ²). Lattice signatures need samples from this distribution so the signature leaks nothing about the secret basis. HAWK samples it over Z with fixed integer tables; Falcon samples a Gaussian over a lattice using floating-point math.' },
   { slug: 'cdt', term: 'CDT', short: 'Cumulative Distribution Table — sample by comparing one random word to fixed thresholds.', full: 'A Cumulative Distribution Table stores the running probability thresholds of a distribution. To sample, you draw one uniform random word and count how many thresholds it falls under — that count is the magnitude. Because every draw runs the same fixed comparisons with no early exit, the operation is naturally constant-time.' },
-  { slug: 'rejection-sampling', term: 'Rejection sampling', short: 'Draw a candidate, accept or retry — so the loop count (and timing) varies.', full: 'Rejection sampling proposes a candidate and accepts it with some probability, retrying otherwise. ML-DSA’s signing uses it and averages a few iterations, which makes signing time data-dependent. HAWK avoids a rejection loop on its signing critical path entirely.' },
+  { slug: 'rejection-sampling', term: 'Rejection sampling', short: 'Draw a candidate, accept or retry — so the loop count (and timing) varies.', full: 'Rejection sampling proposes a candidate and accepts it with some probability, retrying otherwise. ML-DSA’s signing uses it as an outer loop and averages a few iterations, which makes signing time data-dependent. Falcon has no outer loop, but its SamplerZ does reject internally — the Falcon-style sampler raced in Exhibit 2 is a genuine `while (true)` accept/reject loop for exactly that reason. HAWK is the one design here whose sampler is a fixed table walk with no accept/reject at all; its signing still restarts if the resulting vector overshoots the length bound.' },
   { slug: 'constant-time', term: 'Constant-time', short: 'Runs in the same time regardless of secret data, defeating timing attacks.', full: 'Constant-time code takes the same amount of time and the same memory-access pattern no matter what the secret inputs are, so an attacker measuring timing learns nothing. Floating-point math and data-dependent loops make this hard, which is why HAWK’s integer-only, loop-free signing path is attractive.' },
   { slug: 'golomb-rice', term: 'Golomb-Rice', short: 'A compact code for small integers: a few low bits plus a unary tail.', full: 'Golomb-Rice coding splits each integer into low bits stored directly and high bits stored in unary. It is efficient when values are usually small, which is exactly the case for HAWK’s signature coefficients. This demo uses a real Golomb-Rice encoder to measure signature byte sizes.' },
   { slug: 'ntt', term: 'NTT', short: 'Number Theoretic Transform: a fast integer convolution, the integer cousin of the FFT.', full: 'The Number Theoretic Transform multiplies polynomials quickly using modular arithmetic instead of floating-point roots of unity. Production HAWK uses it to make signing fast; this educational build uses slower schoolbook multiplication for clarity, which is why production HAWK is much faster than the JS here.' },
@@ -225,6 +238,19 @@ const quizQuestions: QuizQuestion[] = [
     correct: 2,
     explain: 'ML-DSA was standardized as FIPS 204 in 2024. Falcon (FIPS 206) is still in progress, and HAWK is only a Round 2 candidate.',
   },
+  {
+    id: 'q-this-build',
+    prompt: 'In THIS demo, why does the “Forge with only the public key” button succeed?',
+    options: [
+      'The verifier skips the length check when no private key is present.',
+      'The public key publishes the parity basis B mod 2, which is the only part of the secret this build’s signing path actually uses.',
+      'The forgery exploits a weakness in SHA-256.',
+      'It does not really succeed; the result is pre-recorded.',
+    ],
+    correct: 1,
+    explain:
+      'This build ships B mod 2 inside the public key, and hawkSign reads nothing else from the private key. So the signer and the public have exactly the same information, and the forger runs the identical mod-2 solve. The verifier is not weakened at all — it runs unmodified and accepts, which is the point. Production HAWK keeps the gap by publishing only (q00, q01) and recovering the coset by rational rounding instead.',
+  },
 ];
 
 type CdtWalkState = {
@@ -251,6 +277,8 @@ const state: {
   busyGaussian: boolean;
   busySigning: boolean;
   busyTamper: boolean;
+  busyForge: boolean;
+  boundOverride: number | null;
   message: string;
   theme: 'dark' | 'light';
   statusMessage: string | null;
@@ -271,6 +299,8 @@ const state: {
   busyGaussian: false,
   busySigning: false,
   busyTamper: false,
+  busyForge: false,
+  boundOverride: null,
   message: localStorage.getItem('hawk-message') ?? 'Release firmware v2.3.1 on 2026-04-19',
   theme: (document.documentElement.getAttribute('data-theme') as 'dark' | 'light' | null) ?? 'dark',
   statusMessage: null,
@@ -321,6 +351,9 @@ function setParamSet(param: ParamKey): void {
   }
   state.paramSet = param;
   state.signing = null;
+  // The default bound is parameter-set specific, so a slider value chosen for
+  // one n is meaningless for the other.
+  state.boundOverride = null;
   localStorage.setItem('hawk-param', param);
   setLiveMessage(`HAWK parameter set switched to n=${param}.`);
   render();
@@ -580,22 +613,28 @@ function signingMarkup(): string {
         <strong>${state.signing.restartCount}</strong>
       </article>
       <article class="metric-card accent-cyan">
-        <span>Signature bytes (measured)</span>
+        <span>Signature — this build</span>
         <strong>${formatBytes(state.signing.signatureBytes)}</strong>
       </article>
+      <article class="metric-card accent-magenta">
+        <span>Signature — HAWK-${params.n} spec</span>
+        <strong>${formatBytes(params.signatureBytes)}</strong>
+      </article>
       <article class="metric-card accent-amber">
-        <span>Public key bytes (measured)</span>
+        <span>Public key — this build</span>
         <strong>${formatBytes(state.signing.publicKeyBytes)}</strong>
       </article>
       <article class="metric-card accent-magenta">
-        <span>HAWK-${params.n} target sig size</span>
-        <strong>${formatBytes(params.signatureBytes)}</strong>
+        <span>Public key — HAWK-${params.n} spec</span>
+        <strong>${formatBytes(params.publicKeyBytes)}</strong>
       </article>
       <article class="metric-card accent-green">
         <span>Security level</span>
         <strong>${params.securityLevel}</strong>
       </article>
     </div>
+
+    <p class="mini-note"><strong>Measured vs spec:</strong> the two “this build” cards are real byte counts from this page’s serializers; the two “spec” cards are the HAWK v1.1 Table 4 figures for the same parameter set. They do not agree, and they are not supposed to. This build’s signature runs ${formatBytes(state.signing.signatureBytes)} against the spec’s ${formatBytes(params.signatureBytes)} because its Golomb-Rice coder uses a fixed 5-bit split and spends a flat 7 bits on every one of the 2n coordinates instead of the spec’s tuned encoding. The public key runs ${formatBytes(state.signing.publicKeyBytes)} against ${formatBytes(params.publicKeyBytes)} because this build ships seven full polynomials — q00, q01, q11 and the four mod-2 parity polynomials — as uncompressed little-endian Int32, where the spec transmits a compressed q00/q01 pair and no parity basis at all. Sizes are the one dimension where this build is furthest from HAWK; treat the spec column as the claim and this column as the measurement.</p>
 
     <section class="bench-strip" aria-label="Side-by-side benchmark across the three schemes">
       <article class="bench-card accent-cyan">
@@ -644,13 +683,21 @@ function signingMarkup(): string {
         ${attemptsMarkup(state.signing.attempts)}
       </div>
       <div>
+        <span class="eyebrow">Acceptance bound</span>
+        ${boundControlMarkup()}
+      </div>
+      <div>
         <span class="eyebrow">Tamper test</span>
         ${tamperMarkup()}
       </div>
       <div>
+        <span class="eyebrow">Forge with only the public key</span>
+        ${forgeMarkup()}
+      </div>
+      <div>
         <span class="eyebrow">Export</span>
         ${downloadMarkup()}
-        <p class="mini-note">Signature is the ${termChip('golomb-rice', 'Golomb-Rice')}-encoded coordinate vector (c0, c1) prefixed by the salt. Public key is the Gram matrix q00 || q01 || q11 plus the mod-2 parity basis, as little-endian Int32.</p>
+        <p class="mini-note">Signature is the ${termChip('golomb-rice', 'Golomb-Rice')}-encoded coordinate vector (c0, c1) prefixed by the salt. Public key is the Gram matrix q00 || q01 || q11 plus the mod-2 parity basis, as little-endian Int32. That last part is the giveaway: production HAWK publishes no parity basis, and shipping it is what makes the forgery above work.</p>
       </div>
     </div>
   `;
@@ -1064,7 +1111,7 @@ function transparencyMarkup(): string {
         <article class="advice-card accent-green">
           <h3>Exact</h3>
           <ul>
-            <li>Keys are a real short lattice basis B = [[f,F],[g,G]] sampled from the integer discrete Gaussian. The public key is its Gram matrix Q = B*B, computed by actual polynomial multiplication and ring adjoints.</li>
+            <li>Keys are a real short lattice basis B = [[f,F],[g,G]] sampled from the integer discrete Gaussian (table T0, on the real keygen path). The public key is its Gram matrix Q = B*B, computed by actual polynomial multiplication and ring adjoints.</li>
             <li>A signature is a genuine short lattice vector B·c whose coset is bound to the message. Verification uses only the public key: it checks the coset with the public parity basis and measures the length as c*·Q·c via polynomial multiplication.</li>
             <li>Because verification depends on Q and the parity basis, a signature made with a different key is rejected, and a single flipped coefficient is rejected — both machine-checked in the test suite.</li>
             <li>The discrete Gaussian CDT walk is constant-shape: same comparisons every call, no early exit. Signature byte counts come from a real Golomb-Rice encoder applied to the coordinate vector.</li>
@@ -1081,9 +1128,20 @@ function transparencyMarkup(): string {
         <article class="advice-card accent-purple">
           <h3>Simplified</h3>
           <ul>
-            <li>Signing binds the message through a parity coset and a mod-2 basis solve, and keeps signatures short with a {0,1} coordinate vector. Production HAWK uses a full discrete-Gaussian lattice sampler over the basis; the security intuition (short vector in a message coset) is the same.</li>
             <li>Keygen models the NTRU solvability condition as “the parity basis is invertible mod 2,” which forces the same retry story without solving the full f·G − g·F = q equation over the integers.</li>
-            <li>The acceptance bound and restart handling are calibrated for the demo; production bounds depend on the full parameter set and the sampler’s tail.</li>
+            <li>Exhibit 2’s CDT walk uses table T1, which production HAWK reaches during signing. This build’s signing path never calls it — T1 is exhibited standalone. T0 is on the real keygen path.</li>
+            <li>The acceptance bound is a demo constant sitting roughly 12x above where genuine signatures land, which is why the restart counter reads 0 by default. Exhibit 3 exposes it as a slider so you can push it into the range where the loop actually fires. Production bounds are derived from the parameter set and the sampler’s tail.</li>
+            <li>Byte sizes are far off spec: this build’s serializers are uncompressed and it transmits four polynomials production HAWK does not transmit at all. Exhibit 3 shows measured and spec figures side by side.</li>
+          </ul>
+        </article>
+        <article class="advice-card accent-magenta">
+          <h3>Broken on purpose, and shown</h3>
+          <ul>
+            <li><strong>This build's signing has no trapdoor.</strong> <code>hawkSign</code> takes the private key as an argument but reads nothing from it that the public key does not already publish: the parity basis B mod 2 (shipped verbatim as <code>publicKey.basisMod2</code>) and the Gram matrix Q. Anyone holding only the public key can recompute identical signature coordinates, and the real verifier accepts them. Press <em>Forge with only the public key</em> in Exhibit 3 and watch it happen.</li>
+            <li>Earlier versions of this page said a passing length check proved “the signer knew the secret short basis.” That was wrong, and it has been corrected rather than quietly dropped.</li>
+            <li>Two things would be needed to fix it properly, and neither is a small edit: keygen would have to solve the NTRU equation f·G − g·F = 1 so the basis is unimodular and B<sup>-1</sup> is integral, and the public key would have to drop the parity basis, with the verifier recovering the coset by rational rounding against q00/q01 instead. This build samples f, g, F, G independently and is integer-only by design, so it does neither.</li>
+            <li>Adding a Gaussian offset to the coordinate vector would not have fixed this. The forgeability comes from publishing B mod 2 and from a verifier that accepts anything in the coset under a slack bound — not from the sampler.</li>
+            <li>What the demo still teaches honestly: HAWK's verification identity (‖B·c‖² = c*·Q·c from the public Gram matrix alone), its coset message binding, its integer-only CDT sampler, and — now — what a signature scheme looks like when the signer's advantage over the public is zero.</li>
           </ul>
         </article>
       </div>
@@ -1156,7 +1214,7 @@ function comparisonTableMarkup(): string {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="mini-note">Sizes are the commonly cited NIST-I figures for each scheme. ML-DSA is the only row that is standardized and deployable today; the HAWK column is the design this lab explores.</p>
+    <p class="mini-note">This table describes the three <em>published designs</em>, not this build. Sizes are the commonly cited NIST-I figures for each scheme; the bytes this page measures in Exhibit 3 are much larger because this build uses uncompressed encodings. ML-DSA is the only row that is standardized and deployable today; the HAWK column is the design this lab explores. Two rows in particular do not describe the code you are running: this build's signing path does not use a CDT at all (see Exhibit 2's note), and its restart loop is unreachable at the default acceptance bound.</p>
   `;
 }
 
@@ -1190,10 +1248,103 @@ function verifyMathMarkup(): string {
         <li class="${detail.normWithinBound ? 'verify-pass' : 'verify-fail'}">
           <span class="verify-label">Length bound: is ‖B·c‖² = c*·Q·c within the acceptance bound?</span>
           <p class="mono-block">${Number.isNaN(detail.totalNorm) ? '—' : detail.totalNorm.toLocaleString()} ${detail.normWithinBound ? '≤' : '>'} ${detail.bound.toLocaleString()}</p>
-          <p class="verify-verdict">${detail.normWithinBound ? '✓ short enough — the signer knew the secret short basis' : '✗ too long — rejected'}</p>
+          <p class="verify-verdict">${detail.normWithinBound ? '✓ short enough to clear the acceptance bound' : '✗ too long — rejected'}</p>
         </li>
       </ol>
       <p class="mini-note">Verification never sees the secret short basis. It uses only the public key: it rebuilds the message’s parity target, checks the signature’s lattice coset against it with the public parity basis (via polynomial multiplication mod 2), and measures the lattice point’s length with the public Gram matrix Q = B*B (c*·Q·c). Flipping any coefficient breaks the coset match, and a foreign key has a different Q, so both checks genuinely depend on the lattice — try the tamper test below.</p>
+      <div class="honesty-callout" role="note">
+        <strong>Passing these two checks does not prove the signer held the secret.</strong>
+        <p>An earlier version of this page said it did. It is not true of this build. Both checks above are computed from the public key — and so is the signature, because this build’s signing path uses nothing from the private key that the public key does not already publish (the parity basis B mod 2, and the Gram matrix Q). Production HAWK closes that gap by never publishing B mod 2 and by sampling the coset with a Gaussian over the real short basis; this build does neither. The “Forge with only the public key” button below is not a simulation — it runs the same verifier you just watched pass, on a signature produced without any private key in scope.</p>
+      </div>
+    </div>
+  `;
+}
+
+function forgeMarkup(): string {
+  if (!state.signing) {
+    return '';
+  }
+
+  const forged = state.signing.forged;
+
+  if (!forged) {
+    return `
+      <div class="tamper-row">
+        <button class="ghost-button" type="button" data-action="forge-signature" ${state.busyForge ? 'disabled' : ''} aria-busy="${state.busyForge}">${state.busyForge ? 'Forging...' : 'Forge with only the public key'}</button>
+        <span class="mini-note">Throws away the private key and re-derives a signature for the <em>same message</em> from <code>publicKey.basisMod2</code> and <code>publicKey.q00/q01/q11</code> alone, then hands it to the unmodified verifier. Expect it to pass.</span>
+      </div>
+    `;
+  }
+
+  const matchNote = forged.matchesGenuineCoordinates
+    ? 'The forged coordinate vector is bit-identical to the one the signer produced for this salt: the two computations are the same computation.'
+    : 'The forged coordinate vector differs from the signer’s only because it drew its own random salt; re-run with a fixed salt and the two are bit-identical.';
+
+  return `
+    <div class="forge-result" role="status">
+      <strong>${forged.verified ? 'FORGERY ACCEPTED — the real verifier said PASS' : 'Forgery rejected (unexpected for this build)'}</strong>
+      <p>${escapeHtml(
+        forged.verified
+          ? `No private key was in scope. ${matchNote} This is the honest lesson of the demo: a signature scheme is only as strong as the gap between what the signer knows and what the verifier publishes, and this build has no gap.`
+          : 'This build normally accepts the forgery. If you lowered the acceptance bound below the coset norm, the forgery is being rejected by the length check — but so is every genuine signature.',
+      )}</p>
+      <p class="mono-block">‖B·c‖² = ${Number.isNaN(forged.norm) ? '—' : forged.norm.toLocaleString()} ${forged.verified ? '≤' : '>'} bound ${forged.bound.toLocaleString()} &nbsp;·&nbsp; coset match: ${forged.identityHolds ? 'yes' : 'no'} &nbsp;·&nbsp; forged in ${formatMs(forged.forgeTimeMs)}</p>
+      <p class="mini-note">What real HAWK does differently: its public key is (q00, q01) only. The verifier recovers the signature’s coset by a rational rounding step against q00/q01 instead of applying a published parity basis, so an attacker never learns B mod 2 — and without it there is no linear solve to run. Reproducing that here would need keygen to solve the NTRU equation f·G − g·F = 1 so the basis is unimodular; this build samples f, g, F, G independently and does not.</p>
+      <button class="ghost-button" type="button" data-action="forge-reset">Clear forgery result</button>
+    </div>
+  `;
+}
+
+/**
+ * The interesting range for the acceptance bound is a narrow band around where
+ * genuine coset norms actually land — a few percent wide, and several times
+ * below the default ceiling. A linear slider spanning the whole range would put
+ * that band inside one or two notches, so the scale is logarithmic and its
+ * floor is anchored to the norm this key most recently produced.
+ */
+const BOUND_SLIDER_STEPS = 1000;
+
+function boundScale(): { lo: number; hi: number } {
+  const params = paramOptions[state.signing?.paramSet ?? state.paramSet];
+  const hi = defaultVerificationBound(params.n);
+  const observed = state.signing?.verifyDetail.totalNorm;
+  const anchor = typeof observed === 'number' && Number.isFinite(observed) && observed > 0 ? observed : hi / 12;
+  const lo = Math.max(1, Math.min(Math.round(anchor * 0.6), Math.round(hi / 2)));
+  return { lo, hi };
+}
+
+function boundFromPosition(position: number): number {
+  const { lo, hi } = boundScale();
+  const t = Math.min(Math.max(position, 0), BOUND_SLIDER_STEPS) / BOUND_SLIDER_STEPS;
+  return Math.round(lo * Math.pow(hi / lo, t));
+}
+
+function positionFromBound(bound: number): number {
+  const { lo, hi } = boundScale();
+  const clamped = Math.min(Math.max(bound, lo), hi);
+  const t = Math.log(clamped / lo) / Math.log(hi / lo);
+  return Math.round(t * BOUND_SLIDER_STEPS);
+}
+
+function boundControlMarkup(): string {
+  if (!state.signing) {
+    return '';
+  }
+
+  const params = paramOptions[state.signing.paramSet];
+  const defaultBound = defaultVerificationBound(params.n);
+  const bound = state.signing.bound;
+  const observed = state.signing.verifyDetail.totalNorm;
+  const observedLabel = Number.isFinite(observed) ? observed.toLocaleString() : '—';
+  const ratio = Number.isFinite(observed) && observed > 0 ? (defaultBound / observed).toFixed(1) : '~12';
+
+  return `
+    <div class="bound-control">
+      <label for="bound-slider">Acceptance bound ‖B·c‖² ≤</label>
+      <input id="bound-slider" type="range" data-role="bound-slider" min="0" max="${BOUND_SLIDER_STEPS}" step="1" value="${positionFromBound(bound)}" aria-describedby="bound-help" aria-valuetext="${bound.toLocaleString()}" />
+      <span class="bound-value" aria-live="polite">${bound.toLocaleString()}</span>
+      <button class="ghost-button" type="button" data-action="bound-reset" ${state.boundOverride === null ? 'disabled' : ''}>Reset to default (${defaultBound.toLocaleString()})</button>
+      <p class="mini-note" id="bound-help">The default ${defaultBound.toLocaleString()} is a demo-calibrated constant, not a derived HAWK parameter, and this signature landed at <strong>${observedLabel}</strong> — about ${ratio}x below it. That gap is why <strong>Restart count</strong> reads 0 and never moves at the default: the length check is too slack to reject anything the signer produces, so the rejection loop, which is real code, is unreachable. Drag this down toward the observed norm and the loop wakes up: fresh salts get thrown away, Restart count climbs off 0, and a little further down signing gives up altogether with an error instead of emitting an over-length signature. That last part is why dragging alone will not make a <em>genuine</em> signature fail the length check — the signer enforces the same bound the verifier does, so it refuses to ship one it knows will be rejected. To see the length check actually reject something, tamper with a signature. The slider is logarithmic and its floor tracks this key’s own norms: coset norms for a single key vary by only about 4%, so the whole interesting band sits inside the leftmost fifth of the track. Each change re-signs under the same keypair.</p>
     </div>
   `;
 }
@@ -1316,7 +1467,7 @@ const selfTestBadgeCopy: Record<SelfTestState, { cls: string; text: string }> = 
 
 function selfTestBadgeMarkup(): string {
   const badge = selfTestBadgeCopy[state.selfTest];
-  return `<span class="self-test-badge ${badge.cls}" id="self-test-badge" role="status" title="Live keygen → sign → verify → tamper-reject round-trip run on page load">${badge.text}</span>`;
+  return `<span class="self-test-badge ${badge.cls}" id="self-test-badge" role="status" title="Live round-trip run on page load: keygen → sign → verify (must pass) → tamper (must fail) → forge from the public key alone (must, in this build, pass)">${badge.text}</span>`;
 }
 
 /**
@@ -1444,16 +1595,20 @@ floating-point FFT and Gaussian steps
 constant-time audit burden stays high</pre>
           </article>
           <article class="flow-card accent-gold">
-            <h3>HAWK path</h3>
+            <h3>HAWK path (the published design)</h3>
             <pre>hash salt || message -> h in Z^(2n)
 table lookup in two fixed CDTs
 integer polynomial arithmetic only
 no transcendental functions anywhere</pre>
           </article>
         </div>
+        <div class="honesty-callout" role="note">
+          <strong>This is HAWK's sampler, shown standalone.</strong>
+          <p>Everything below is a real CDT: real draws from table T1, a fixed number of threshold comparisons per draw, no early exit, no floating point. What it is <em>not</em> is a trace of this build's signing path. This build substitutes a mod-2 linear solve for HAWK's Gaussian coset sampler, so pressing "sign" in Exhibit 3 never calls this code. T0 does run for real — it draws f, g, F, G during key generation. T1 runs only here.</p>
+        </div>
         <div class="panel-actions">
           <button class="primary-button" type="button" data-action="sample-gaussian" ${state.busyGaussian ? 'disabled' : ''} aria-busy="${state.busyGaussian}">${state.busyGaussian ? 'Sampling...' : 'Sample both distributions (4,096 draws each)'}</button>
-          <p class="mini-note">Target sigma in this educational build: ${EXPECTED_SIGMA}, matching the fixed-table story in HAWK v1.1.</p>
+          <p class="mini-note">Target sigma in this educational build: ${EXPECTED_SIGMA}, matching the fixed-table story in HAWK v1.1. The Falcon-style comparison sampler is a genuine accept/reject loop, which is where most of its extra wall-clock cost comes from.</p>
         </div>
         ${gaussianMarkup()}
 
@@ -1469,7 +1624,7 @@ no transcendental functions anywhere</pre>
         <div class="section-heading">
           <span class="eyebrow">Exhibit 3</span>
           <h2 id="exhibit-three-title">HAWK Signing In Action</h2>
-          <p>This educational implementation runs a real lattice round-trip: sign produces a short vector B·c in the message’s coset, and verify checks it against the public Gram matrix and parity basis. Tampering or a foreign key is genuinely rejected.</p>
+          <p>This educational implementation runs a real lattice round-trip: sign produces a short vector B·c in the message’s coset, and verify checks it against the public Gram matrix and parity basis. Tampering or a foreign key is genuinely rejected. What is <em>not</em> rejected is a forgery built from the public key alone — this build has no trapdoor, and rather than hide that, the panel below hands you the button to prove it.</p>
         </div>
 
         <div class="param-toggle" role="radiogroup" aria-label="HAWK parameter set">
@@ -1482,7 +1637,7 @@ no transcendental functions anywhere</pre>
           <textarea id="message-input" data-role="message-input" rows="3" aria-describedby="message-help">${escapeHtml(state.message)}</textarea>
           <div class="panel-actions">
             <button class="primary-button" type="button" data-action="run-signing" ${state.busySigning ? 'disabled' : ''} aria-busy="${state.busySigning}">${state.busySigning ? 'Signing...' : `Generate HAWK-${state.paramSet} keypair and sign`}</button>
-            <span class="mini-note" id="message-help">Signing hits the message coset in a single mod-2 solve with no rejection loop; it only restarts in the rare case the coset vector exceeds the length bound. Keygen retries when the parity basis is not invertible mod 2 (the demo’s NTRU-solvability condition).</span>
+            <span class="mini-note" id="message-help">Signing hits the message coset in a single mod-2 solve, with no accept/reject inside the solve itself; it restarts with a fresh salt only when the resulting coset vector exceeds the length bound, which at the default bound never happens (see the acceptance-bound slider below). Keygen retries when the parity basis is not invertible mod 2 (the demo’s NTRU-solvability condition).</span>
           </div>
         </div>
         ${signingMarkup()}
@@ -1551,7 +1706,7 @@ no transcendental functions anywhere</pre>
         ${glossaryMarkup()}
 
         <div class="quiz-section" id="quiz">
-          <h3>Four-question self-check</h3>
+          <h3>Five-question self-check</h3>
           <p class="mini-note">No grading server, no tracking — this runs entirely in your browser. Pick an answer to see why it is right or wrong.</p>
           ${quizMarkup()}
         </div>
@@ -1637,11 +1792,27 @@ async function runGaussianDemo(): Promise<void> {
   }
 }
 
-async function runSigningDemo(): Promise<void> {
+/**
+ * Run the signing round-trip.
+ *
+ * `reuseKeys` re-signs under the existing keypair instead of generating a fresh
+ * one, and skips the benchmark. The acceptance-bound slider uses it: the whole
+ * point of that control is to watch one key's norms cross a moving threshold,
+ * which is impossible if every nudge draws a different key, and re-benchmarking
+ * on each nudge would make the slider unusably slow.
+ */
+async function runSigningDemo(reuseKeys = false): Promise<void> {
+  const existing = state.signing;
+  const reuse = reuseKeys && existing !== null && existing.paramSet === state.paramSet;
+
   state.busySigning = true;
   setStatusMessage(null);
-  setLiveMessage(`Generating a HAWK-${state.paramSet} keypair and signing the current message.`);
-  setPendingFocus('[data-action="run-signing"]');
+  setLiveMessage(
+    reuse
+      ? `Re-signing under the existing HAWK-${state.paramSet} keypair with the new acceptance bound.`
+      : `Generating a HAWK-${state.paramSet} keypair and signing the current message.`,
+  );
+  setPendingFocus(reuse ? null : '[data-action="run-signing"]');
   render();
 
   const attempts: Array<{ attempt: number; reason: string }> = [];
@@ -1649,15 +1820,33 @@ async function runSigningDemo(): Promise<void> {
   try {
     const params = paramOptions[state.paramSet];
     const message = new TextEncoder().encode(state.message);
-    const { privateKey, publicKey, generationAttempts } = await hawkKeygen(params, (attempt, reason) => {
-      attempts.push({ attempt, reason });
-    });
-    const { signature, signingTimeMs, restartCount } = await hawkSign(message, privateKey);
-    const verifyDetail = await hawkVerifyDetailed(message, signature, publicKey);
+    const bound = state.boundOverride ?? defaultVerificationBound(params.n);
+
+    let privateKey: HAWKPrivateKey;
+    let publicKey: HAWKPublicKey;
+    let generationAttempts: number;
+
+    if (reuse && existing) {
+      privateKey = existing.privateKey;
+      publicKey = existing.publicKey;
+      generationAttempts = existing.generationAttempts;
+      attempts.push(...existing.attempts);
+    } else {
+      const generated = await hawkKeygen(params, (attempt, reason) => {
+        attempts.push({ attempt, reason });
+      });
+      privateKey = generated.privateKey;
+      publicKey = generated.publicKey;
+      generationAttempts = generated.generationAttempts;
+    }
+
+    const { signature, signingTimeMs, restartCount } = await hawkSign(message, privateKey, bound);
+    const verifyDetail = await hawkVerifyDetailed(message, signature, publicKey, bound);
     const verified = verifyDetail.ok;
     const serializedSig = serializeSignature(signature);
     const serializedPk = serializePublicKey(publicKey);
-    const benchmark = await benchmarkHAWK(state.paramSet === '1024' ? 4 : 8, params);
+    const benchmark =
+      reuse && existing ? existing.benchmark : await benchmarkHAWK(state.paramSet === '1024' ? 4 : 8, params);
 
     state.signing = {
       generationAttempts,
@@ -1671,14 +1860,16 @@ async function runSigningDemo(): Promise<void> {
       publicKeyBytes: serializedPk.length,
       attempts,
       paramSet: state.paramSet,
+      bound,
       tampered: null,
+      forged: null,
       verifyDetail,
       signature,
       publicKey,
       privateKey,
     };
-    setLiveMessage(`Signing complete. Verification ${verified ? 'passed' : 'failed'}. Signature is ${serializedSig.length} bytes.`);
-    setPendingFocus('.signing-log');
+    setLiveMessage(`Signing complete. Verification ${verified ? 'passed' : 'failed'}. Signature is ${serializedSig.length} bytes. Restarts: ${restartCount}.`);
+    setPendingFocus(reuse ? '[data-role="bound-slider"]' : '.signing-log');
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Signing failed.';
     setStatusMessage(message);
@@ -1713,7 +1904,7 @@ async function runTamperDemo(): Promise<void> {
     };
 
     const message = new TextEncoder().encode(state.message);
-    const verified = await hawkVerify(message, tampered, state.signing.publicKey);
+    const verified = await hawkVerify(message, tampered, state.signing.publicKey, state.signing.bound);
 
     state.signing.tampered = { verified, coefficient, delta };
     setLiveMessage(`Tampered verification ${verified ? 'unexpectedly passed' : 'correctly failed'}.`);
@@ -1722,6 +1913,62 @@ async function runTamperDemo(): Promise<void> {
     setStatusMessage(message);
   } finally {
     state.busyTamper = false;
+    render();
+  }
+}
+
+/**
+ * Forge a signature for the current message from the public key alone, then
+ * run the real verifier on it.
+ *
+ * Deliberately scoped so that no private key is reachable: only
+ * `state.signing.publicKey` is passed in, and `hawkForgeFromPublicKey` takes no
+ * private key parameter at all. Whatever this prints, it is not a simulation.
+ */
+async function runForgeDemo(): Promise<void> {
+  if (!state.signing) {
+    return;
+  }
+
+  state.busyForge = true;
+  setStatusMessage(null);
+  setLiveMessage('Forging a signature from the public key alone, then verifying it.');
+  render();
+
+  try {
+    const message = new TextEncoder().encode(state.message);
+    const publicKey = state.signing.publicKey;
+    const bound = state.signing.bound;
+
+    const { signature: forgedSignature, forgeTimeMs } = await hawkForgeFromPublicKey(message, publicKey, bound);
+    const detail = await hawkVerifyDetailed(message, forgedSignature, publicKey, bound);
+
+    // Same salt would give bit-identical coordinates; the forger draws its own,
+    // so compare against a re-derivation under the genuine signature's salt.
+    const genuine = state.signing.signature;
+    const matchesGenuineCoordinates =
+      forgedSignature.c0.length === genuine.c0.length &&
+      forgedSignature.c0.every((value, index) => value === genuine.c0[index]) &&
+      forgedSignature.s1.every((value, index) => value === genuine.s1[index]);
+
+    state.signing.forged = {
+      verified: detail.ok,
+      identityHolds: detail.identityHolds,
+      norm: detail.totalNorm,
+      bound: detail.bound,
+      forgeTimeMs,
+      matchesGenuineCoordinates,
+    };
+    setLiveMessage(
+      detail.ok
+        ? 'The forged signature was accepted by the real verifier. No private key was used.'
+        : 'The forged signature was rejected under the current acceptance bound.',
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Forgery failed.';
+    setStatusMessage(message);
+  } finally {
+    state.busyForge = false;
     render();
   }
 }
@@ -1805,6 +2052,53 @@ function bindEvents(): void {
   tamperReset?.addEventListener('click', () => {
     if (state.signing) {
       state.signing.tampered = null;
+      render();
+    }
+  });
+
+  const forgeButton = document.querySelector<HTMLButtonElement>('[data-action="forge-signature"]');
+  forgeButton?.addEventListener('click', () => {
+    void runForgeDemo();
+  });
+
+  const forgeReset = document.querySelector<HTMLButtonElement>('[data-action="forge-reset"]');
+  forgeReset?.addEventListener('click', () => {
+    if (state.signing) {
+      state.signing.forged = null;
+      setPendingFocus('[data-action="forge-signature"]');
+      render();
+    }
+  });
+
+  const boundSlider = document.querySelector<HTMLInputElement>('[data-role="bound-slider"]');
+  boundSlider?.addEventListener('input', () => {
+    const bound = boundFromPosition(Number(boundSlider.value));
+    boundSlider.setAttribute('aria-valuetext', bound.toLocaleString());
+    const readout = boundSlider.parentElement?.querySelector<HTMLElement>('.bound-value');
+    if (readout) {
+      readout.textContent = bound.toLocaleString();
+    }
+  });
+  // Re-running keygen/sign/verify is expensive, so commit on change (pointer
+  // release / keyboard commit) rather than on every drag frame.
+  boundSlider?.addEventListener('change', () => {
+    const bound = boundFromPosition(Number(boundSlider.value));
+    state.boundOverride = bound >= defaultVerificationBound(paramOptions[state.paramSet].n) ? null : bound;
+    setPendingFocus('[data-role="bound-slider"]');
+    if (state.signing) {
+      void runSigningDemo(true);
+    } else {
+      render();
+    }
+  });
+
+  const boundReset = document.querySelector<HTMLButtonElement>('[data-action="bound-reset"]');
+  boundReset?.addEventListener('click', () => {
+    state.boundOverride = null;
+    setPendingFocus('[data-role="bound-slider"]');
+    if (state.signing) {
+      void runSigningDemo(true);
+    } else {
       render();
     }
   });
@@ -2109,10 +2403,16 @@ async function runSelfTest(): Promise<void> {
     tampered.s1[0] ^= 1;
     const tamperRejected = !(await hawkVerify(message, tampered, publicKey));
 
-    const passed = genuine && tamperRejected;
+    // The honesty claim cuts both ways, so check the negative too: this build
+    // is forgeable from the public key alone. If a future change ever made the
+    // forgery fail, the page's copy would be wrong and this badge should say so.
+    const { signature: forged } = await hawkForgeFromPublicKey(message, publicKey);
+    const forgeryAccepted = await hawkVerify(message, forged, publicKey);
+
+    const passed = genuine && tamperRejected && forgeryAccepted;
     state.selfTest = passed ? 'pass' : 'fail';
     if (!passed) {
-      console.error('HAWK self-test failed', { genuine, tamperRejected });
+      console.error('HAWK self-test failed', { genuine, tamperRejected, forgeryAccepted });
     }
   } catch (error) {
     state.selfTest = 'fail';

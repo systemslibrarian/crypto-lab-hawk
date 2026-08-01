@@ -13,11 +13,17 @@
  *     parity basis, not just on a hash match
  *   - a norm-only forgery (parity kept, lattice vector inflated) is rejected
  *     by the Gram-matrix bound
+ *   - a PUBLIC-KEY-ONLY forgery is ACCEPTED. That is asserted on purpose: this
+ *     build's signing path has no trapdoor, the page says so and demonstrates
+ *     it with a button, and a claim that visible deserves a test pinning it.
+ *   - the acceptance bound is a live parameter: tightening it below the
+ *     observed norm makes the same verifier reject the same signature
  *   - signature/public-key serialization (determinism + sizes)
  *   - the CDT sampler's distribution via a chi-square goodness-of-fit test
  *   - CDT trace self-consistency (the step-through matches the magnitude)
  */
 import {
+  hawkForgeFromPublicKey,
   hawkKeygen,
   hawkSign,
   hawkVerify,
@@ -135,6 +141,35 @@ async function roundTrip(params: typeof HAWK_512_PARAMS | typeof HAWK_1024_PARAM
   assert(inflatedDetail.identityHolds, `inflated forgery keeps the parity coset (n=${params.n})`);
   assert(!inflatedDetail.normWithinBound, `inflated forgery overshoots the Gram-matrix bound (n=${params.n})`);
   assert(!inflatedDetail.ok, `inflated forgery is rejected by the norm bound (n=${params.n})`);
+
+  // PUBLIC-KEY-ONLY FORGERY — asserted to SUCCEED, deliberately.
+  //
+  // This build has no signing trapdoor: hawkSign uses nothing from the private
+  // key that the public key does not already publish (B mod 2, shipped verbatim
+  // as publicKey.basisMod2, plus the Gram matrix). The page says so out loud and
+  // hands the visitor a button to prove it, so the claim has to be pinned by a
+  // test in the same way the positive claims are. If a future change ever gives
+  // this build a real trapdoor, this assertion is where it will surface — and
+  // the page copy, the honesty panel, and the README must change with it.
+  const forged = await hawkForgeFromPublicKey(message, publicKey);
+  const forgedDetail = await hawkVerifyDetailed(message, forged.signature, publicKey);
+  assert(forgedDetail.identityHolds, `public-key-only forgery lands in the message coset (n=${params.n})`);
+  assert(forgedDetail.normWithinBound, `public-key-only forgery is short enough (n=${params.n})`);
+  assert(forgedDetail.ok, `public-key-only forgery is ACCEPTED — this build has no trapdoor (n=${params.n})`);
+
+  // The acceptance bound is a live parameter, not a baked-in constant: drive it
+  // below the observed norm and the same verifier rejects the same signature.
+  // This is what makes the bound slider in Exhibit 3 a real control rather than
+  // a decoration, and what makes the restart counter reachable.
+  const tightDetail = await hawkVerifyDetailed(
+    message,
+    signature,
+    publicKey,
+    Math.max(1, Math.floor(detail.totalNorm / 2)),
+  );
+  assert(tightDetail.identityHolds, `a tightened bound leaves the coset check untouched (n=${params.n})`);
+  assert(!tightDetail.normWithinBound, `a tightened bound rejects on length (n=${params.n})`);
+  assert(!tightDetail.ok, `a tightened bound rejects an otherwise-valid signature (n=${params.n})`);
 
   // Serialization: deterministic and correctly sized.
   const sigBytesA = serializeSignature(signature);

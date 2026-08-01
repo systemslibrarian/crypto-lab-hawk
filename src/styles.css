@@ -852,10 +852,94 @@ blockquote footer {
   color: var(--amber);
 }
 
+/* Honesty callout: this build diverges from the spec here */
+.honesty-callout {
+  margin: 18px 0;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 170, 0, 0.4);
+  border-left-width: 4px;
+  background-color: rgba(255, 170, 0, 0.1);
+}
+
+.honesty-callout strong {
+  display: block;
+  font-size: 1rem;
+  color: var(--amber);
+}
+
+.honesty-callout p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
+/* Forgery exhibit */
+.forge-result {
+  margin-top: 12px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 64, 189, 0.4);
+  background-color: rgba(255, 64, 189, 0.1);
+}
+
+.forge-result strong {
+  display: block;
+  font-size: 1rem;
+  color: var(--magenta);
+}
+
+.forge-result p {
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+
+.forge-result .mono-block {
+  margin-top: 10px;
+}
+
+/* Acceptance-bound slider */
+.bound-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin: 14px 0;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background-color: var(--panel);
+}
+
+.bound-control label {
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.bound-control input[type='range'] {
+  flex: 1 1 220px;
+  min-width: 180px;
+  accent-color: var(--cyan);
+}
+
+.bound-control .bound-value {
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  color: var(--text);
+}
+
+/* The explanation sits under the controls, not beside them. */
+.bound-control .mini-note {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
 /* Transparency panel */
 .transparency .transparency-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 14px;
 }
 

@@ -17,8 +17,13 @@ import {
 
 /**
  * HAWK secret key: the short lattice basis B = [[f, F], [g, G]] over
- * R = Z[X]/(X^n + 1). Signing needs the actual short integers; the public
- * key exposes only their Gram matrix, never the basis itself.
+ * R = Z[X]/(X^n + 1). In production HAWK, signing needs the actual short
+ * integers and the public key exposes only their Gram matrix.
+ *
+ * In THIS build that is not true: `hawkSign` reads nothing from these
+ * polynomials except their mod-2 image and their Gram matrix, and both of
+ * those are published in `HAWKPublicKey`. See the notes on `HAWKPublicKey`
+ * and `hawkSign`.
  */
 export interface HAWKPrivateKey {
   f: Polynomial;
@@ -32,8 +37,19 @@ export interface HAWKPrivateKey {
 /**
  * HAWK public key. The Gram matrix Q = B* B (q00, q01, q11) is what
  * verification uses to measure a signature's length without ever seeing the
- * short basis; basisMod2 is the parity image [[f,F],[g,G]] mod 2, which is
- * public and lets the verifier bind a signature's coset to the message.
+ * short basis; basisMod2 is the parity image [[f,F],[g,G]] mod 2, which this
+ * build publishes so the verifier can bind a signature's coset to the message.
+ *
+ * HONESTY NOTE: publishing basisMod2 is a simplification, and it is a fatal
+ * one for unforgeability. Production HAWK's public key is (q00, q01) only; the
+ * verifier recovers the coset by a rational rounding step against q00/q01
+ * rather than by applying a published parity basis. Because this build hands
+ * out B mod 2, and because this build's signing path uses nothing about the
+ * secret basis beyond B mod 2 (see `hawkSign`), anyone holding only the public
+ * key can recompute a signature that the real verifier accepts. That is
+ * demonstrated on the page by `hawkForgeFromPublicKey` below, which is wired to
+ * the "Forge with only the public key" control. Treat this build as a working
+ * model of HAWK's *verification identity*, not of its unforgeability.
  */
 export interface HAWKPublicKey {
   q00: Polynomial;
@@ -332,17 +348,30 @@ function getSaltBytes(params: HawkParams): number {
 }
 
 /**
- * The signature-length acceptance bound. A genuine signature is a coset
- * representative B·c with c a {0,1} coordinate vector, so its squared length
- * is bounded by the basis energy; a forged/tampered c overshoots this.
+ * The default signature-length acceptance bound.
+ *
+ * HONESTY NOTE: this is a demo-calibrated constant, not a derived HAWK
+ * parameter. A coset representative B·c with c a {0,1} coordinate vector has
+ * ||B c||^2 concentrated around 9e5 at n=512, so the 1.2e7 ceiling below sits
+ * roughly 12x above where genuine signatures actually land. Two consequences
+ * worth seeing rather than hiding: the norm check is slack enough that it never
+ * rejects anything the signer produces (so `restartCount` is always 0 at the
+ * default), and a *tampered* coordinate vector is caught by the coset check,
+ * not by this bound. The page exposes this number as a slider precisely so a
+ * learner can drag it down through the genuine-norm band and watch restarts
+ * appear and acceptance flip. Production HAWK derives its bound from the
+ * signing sigma and the parameter set; nothing here does.
  */
-function verificationBound(n: number): number {
-  // A genuine signature is a coset representative B·c with c a {0,1}
-  // coordinate vector, so ||B c||^2 is bounded by the basis energy summed
-  // over ~n active coordinates. Empirically genuine norms stay well under
-  // these ceilings for both parameter sets, while a lattice vector built
-  // from a wider/forged coordinate set overshoots them.
+export function defaultVerificationBound(n: number): number {
   return n === HAWK_512_PARAMS.n ? 12_000_000 : 40_000_000;
+}
+
+function verificationBound(n: number, override?: number): number {
+  if (typeof override === 'number' && Number.isFinite(override) && override > 0) {
+    return override;
+  }
+
+  return defaultVerificationBound(n);
 }
 
 export async function hawkKeygen(
@@ -407,9 +436,34 @@ export async function hawkKeygen(
   throw new Error('HAWK key generation exceeded the retry budget.');
 }
 
+/**
+ * Sign a message under the secret basis.
+ *
+ * HONESTY NOTE — READ THIS BEFORE BELIEVING THE PAGE COPY. Despite taking the
+ * private key as an argument, the *only* thing this function uses from it is
+ * the basis reduced mod 2 (plus the Gram matrix, which is also public). Both
+ * are published in `HAWKPublicKey`, so this signing path has no trapdoor: see
+ * `hawkForgeFromPublicKey`, which reproduces identical coordinates from the
+ * public key alone and is accepted by the real verifier.
+ *
+ * Why the shortcut is here rather than fixed: a genuine HAWK trapdoor needs
+ * (a) keygen to solve the NTRU equation f·G − g·F = 1 so that B is unimodular
+ * and B^-1 is an integer matrix, and (b) signing to draw x from a discrete
+ * Gaussian over the coset 2Z^{2n} + (B·h mod 2) and publish w = B^-1·x. This
+ * build samples f, g, F, G independently — no NTRU solve — so B^-1 is not
+ * integral and step (b) has nothing to invert. Layering a Gaussian offset on
+ * top of the mod-2 solve would *not* fix this: the forgeability comes from
+ * publishing B mod 2 and from a verifier that accepts anything in the coset
+ * under a slack bound, not from the sampler. So the flaw is surfaced as an
+ * exhibit instead of being papered over.
+ *
+ * `boundOverride` lets the page drive the acceptance bound from a slider; the
+ * norm rejection below is a real loop, it is simply unreachable at the default.
+ */
 export async function hawkSign(
   message: Uint8Array,
   privateKey: HAWKPrivateKey,
+  boundOverride?: number,
 ): Promise<{
   signature: HAWKSignature;
   signingTimeMs: number;
@@ -419,6 +473,8 @@ export async function hawkSign(
   const startedAt = nowMs();
   const { f, g, F, G } = privateKey;
 
+  // NOTE: fB..GB below are exactly `publicKey.basisMod2`. Nothing secret
+  // survives this reduction.
   const fB = polyMod2(f);
   const gB = polyMod2(g);
   const FB = polyMod2(F);
@@ -428,13 +484,14 @@ export async function hawkSign(
     throw new Error('HAWK signing failed: parity basis is not invertible.');
   }
 
-  const bound = verificationBound(privateKey.n);
+  const bound = verificationBound(privateKey.n, boundOverride);
   const { q00, q01, q11 } = gramMatrix(f, g, F, G);
   let restartCount = 0;
 
-  // No rejection loop on the arithmetic: each pass draws a fresh salt, solves
-  // the parity coset once (a single linear solve mod 2, no retry inside), and
-  // only restarts in the rare event the resulting coset vector is too long.
+  // Each pass draws a fresh salt, solves the parity coset once (a single
+  // linear solve mod 2, no retry inside), and restarts only when the resulting
+  // coset vector exceeds the length bound. At the default bound that never
+  // happens; lower the bound and this becomes a live rejection loop.
   while (restartCount < 8) {
     const salt = new Uint8Array(getSaltBytes(params));
     getCrypto().getRandomValues(salt);
@@ -466,7 +523,74 @@ export async function hawkSign(
     };
   }
 
-  throw new Error('HAWK signing restarted too many times.');
+  throw new Error(
+    `HAWK signing restarted 8 times without landing under the acceptance bound (${bound.toLocaleString()}). ` +
+      'That is the norm-rejection loop doing its job: every fresh salt produced a coset vector longer than the bound you set. ' +
+      'Raise the bound to sign again.',
+  );
+}
+
+/**
+ * Produce a signature for an arbitrary message using ONLY the public key.
+ *
+ * This is the same computation `hawkSign` performs, with `publicKey.basisMod2`
+ * substituted for `polyMod2(f), polyMod2(g), polyMod2(F), polyMod2(G)` — which
+ * is not a substitution at all, because keygen defines basisMod2 as exactly
+ * those four polynomials. The public key also pins down the message target,
+ * since `pubKeyHash` is a hash of the public key. Nothing secret is consulted:
+ * there is no `HAWKPrivateKey` in scope anywhere in this function.
+ *
+ * The output is fed to the unmodified `hawkVerifyDetailed`, which accepts it.
+ * That is the lesson: a signature scheme is only as strong as the gap between
+ * what the signer knows and what the verifier publishes, and this build has no
+ * gap. Real HAWK keeps one by never publishing B mod 2.
+ */
+export async function hawkForgeFromPublicKey(
+  message: Uint8Array,
+  publicKey: HAWKPublicKey,
+  boundOverride?: number,
+): Promise<{
+  signature: HAWKSignature;
+  forgeTimeMs: number;
+  restartCount: number;
+}> {
+  const params = getParamsForN(publicKey.n);
+  const startedAt = nowMs();
+
+  const { f: fB, g: gB, F: FB, G: GB } = publicKey.basisMod2;
+  const parityInverse = invertParityBasis(fB, gB, FB, GB);
+  if (!parityInverse) {
+    throw new Error('Forgery failed: the published parity basis is not invertible.');
+  }
+
+  // Derived from the public key alone, exactly as the verifier derives it.
+  const pubKeyHash = await hashPublicKey(publicKey);
+  const bound = verificationBound(publicKey.n, boundOverride);
+  let restartCount = 0;
+
+  while (restartCount < 8) {
+    const salt = new Uint8Array(getSaltBytes(params));
+    getCrypto().getRandomValues(salt);
+
+    const { h0, h1 } = await hashToParityTarget(message, salt, pubKeyHash, publicKey.n);
+
+    const c0 = polyAddMod2(polyMulMod2(parityInverse.a, h0), polyMulMod2(parityInverse.b, h1));
+    const c1 = polyAddMod2(polyMulMod2(parityInverse.c, h0), polyMulMod2(parityInverse.d, h1));
+
+    const norm = quadraticFormNorm(c0, c1, publicKey.q00, publicKey.q01, publicKey.q11);
+    if (norm > bound) {
+      restartCount += 1;
+      continue;
+    }
+
+    return {
+      signature: { salt, c0, s1: c1, n: publicKey.n },
+      forgeTimeMs: nowMs() - startedAt,
+      restartCount,
+    };
+  }
+
+  throw new Error('Forgery restarted too many times: the acceptance bound is below the coset norm.');
 }
 
 export interface HAWKVerifyDetail {
@@ -504,8 +628,9 @@ export async function hawkVerifyDetailed(
   message: Uint8Array,
   signature: HAWKSignature,
   publicKey: HAWKPublicKey,
+  boundOverride?: number,
 ): Promise<HAWKVerifyDetail> {
-  const bound = verificationBound(publicKey.n);
+  const bound = verificationBound(publicKey.n, boundOverride);
   const n = publicKey.n;
 
   if (signature.n !== publicKey.n) {
@@ -584,8 +709,9 @@ export async function hawkVerify(
   message: Uint8Array,
   signature: HAWKSignature,
   publicKey: HAWKPublicKey,
+  boundOverride?: number,
 ): Promise<boolean> {
-  const detail = await hawkVerifyDetailed(message, signature, publicKey);
+  const detail = await hawkVerifyDetailed(message, signature, publicKey, boundOverride);
   return detail.ok;
 }
 
