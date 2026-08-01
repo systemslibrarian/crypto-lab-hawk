@@ -8,6 +8,16 @@
   --text: #f3f6fb;
   --muted: #9db0c5;
   --line: rgba(255, 255, 255, 0.1);
+  /* Control boundaries only (WCAG 2.1 SC 1.4.11). The message textarea is filled
+     with rgba(255,255,255,0.04) over .exhibit, which composites to #132030 on a
+     #0a1628 card — 1.06:1 — so the border is the only thing delineating the field.
+     --line composites to ~#2c3746 there, 1.27:1. #7d858f is that same navy-grey
+     lightened along its own hue, and clears 3:1 on every stop the field can sit on:
+     .exhibit is a linear-gradient(--panel -> --panel-strong) over a body gradient
+     (cyan/amber radials + --bg -> --bg-mid -> --bg) plus the ::after purple radial.
+     Worst stop 3.44:1, card 4.13:1, --bg 5.07:1. --line is left unchanged for
+     decorative rules — exhibit outlines, dividers, the bound-control panel. */
+  --border-strong: #7d858f;
   --cyan: #00d4ff;
   --amber: #ffaa00;
   --magenta: #ff40bd;
@@ -28,6 +38,12 @@
   --text: #18222d;
   --muted: #516270;
   --line: rgba(24, 34, 45, 0.12);
+  /* Light-theme control boundary (WCAG 2.1 SC 1.4.11). The textarea fill composites
+     to #fefbf5 on a #fefaf5 card — effectively the same colour — and --line lands at
+     ~#e3e4e6, 1.27:1. #757577 is that line colour darkened along its own hue:
+     4.42:1 on the card, 4.56:1 on the lightest --panel-strong stop, 3.44:1 where the
+     ::after purple radial tints the panel, 4.01:1 on --bg (#f4efe4). */
+  --border-strong: #757577;
   --cyan: #0c6079;
   --amber: #8a5c00;
   --magenta: #ad006d;
@@ -475,7 +491,7 @@ blockquote footer {
   padding: 16px 18px;
   resize: vertical;
   border-radius: 18px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--border-strong);
   background-color: rgba(255, 255, 255, 0.04);
   color: var(--text);
 }
