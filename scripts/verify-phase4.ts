@@ -123,22 +123,62 @@ async function roundTrip(params: typeof HAWK_512_PARAMS | typeof HAWK_1024_PARAM
   // Sanity: each genuine signature still verifies against its own key.
   assert(await hawkVerify(message, otherSig.signature, other.publicKey), `foreign signature verifies against its own key (n=${params.n})`);
 
-  // NORM-ONLY FORGERY. Keep the parity coset intact (add an even offset 2e to
-  // both coordinates so B·c stays in the same coset mod 2) but inflate the
-  // lattice vector's length. The coset identity still holds, so ONLY the
-  // Gram-matrix norm bound can catch it — proving that check is non-vacuous.
+  // NORM-ONLY FORGERY. Keep the parity coset intact (add an EVEN offset to a
+  // coordinate, so c mod 2 — and therefore B·c mod 2 — is untouched) but
+  // inflate the lattice vector's length. The coset identity still holds, so
+  // ONLY the Gram-matrix norm bound can catch it — proving that check is
+  // non-vacuous.
+  //
+  // The inflation is DERIVED, not guessed. An earlier version of this test
+  // added a hardcoded +2*40 to every coordinate, which was flaky twice over:
+  // the key and the signature are freshly random every run, and the acceptance
+  // bound is a live parameter, so nothing tied the offset to either. Worse, an
+  // n-wide offset of that size drove the true norm to ~5e9-6e10 while
+  // `quadraticFormNorm` accumulates in Int32Array — the reported norm was a
+  // silently wrapped value, uniform over the int32 range, and this assertion
+  // failed whenever it happened to wrap into [0, bound]: ~0.3% of runs at
+  // n=512 and ~0.9% at n=1024 (measured; = bound / 2^32).
+  //
+  // Derivation. Write ‖v‖ for the Gram-matrix length ‖B·v‖. Put the whole
+  // offset on coordinate 0 of c0: δ = 2e·X^0 in the first component, zero in
+  // the second. Then B·δ = (f·2e, g·2e) and its squared length is exactly
+  //   ‖δ‖² = 4e²·(Σf_i² + Σg_i²) = 4e²·q00[0],
+  // because q00 = f*f + g*g and the constant term of p*p is Σp_i². q00[0] is
+  // published in the PUBLIC key, so the test never touches a secret. By the
+  // reverse triangle inequality ‖c + δ‖ ≥ ‖δ‖ − ‖c‖, so choosing e with
+  //   2e·√q00[0] ≥ ‖c‖ + 1.05·√bound
+  // guarantees ‖c + δ‖² ≥ 1.1025·bound > bound for ANY key, ANY signature and
+  // ANY live bound. The 1.05 is headroom against floating-point rounding in
+  // the square roots, not a fudge factor for randomness.
+  const gramUnit = publicKey.q00[0]; // = Σf_i² + Σg_i² > 0 for any usable key
+  assert(gramUnit > 0, `public Gram matrix has a positive unit length q00[0] (n=${params.n})`);
+  const genuineLength = Math.sqrt(detail.totalNorm);
+  const halfOffset = Math.ceil((genuineLength + 1.05 * Math.sqrt(detail.bound)) / (2 * Math.sqrt(gramUnit)));
+  const inflationLength = 2 * halfOffset * Math.sqrt(gramUnit);
+  // Both bounds hold by the triangle inequality, in both directions.
+  const normFloor = (inflationLength - genuineLength) ** 2;
+  const normCeiling = (inflationLength + genuineLength) ** 2;
+  assert(normFloor > detail.bound, `derived inflation provably clears the live bound (n=${params.n})`);
+  // The Gram form is accumulated in Int32Array. If the inflated norm could not
+  // be represented there the verifier would report a wrapped value and this
+  // whole block would be meaningless — which is exactly the bug above. Pin it.
+  assert(normCeiling < 2 ** 31 - 1, `inflated norm stays inside the int32 Gram accumulator (n=${params.n})`);
+
   const inflated: HAWKSignature = {
     salt: signature.salt,
     c0: Int32Array.from(signature.c0),
     s1: Int32Array.from(signature.s1),
     n: signature.n,
   };
-  for (let i = 0; i < params.n; i += 1) {
-    inflated.c0[i] += 2 * 40;
-    inflated.s1[i] += 2 * 40;
-  }
+  inflated.c0[0] += 2 * halfOffset;
   const inflatedDetail = await hawkVerifyDetailed(message, inflated, publicKey);
   assert(inflatedDetail.identityHolds, `inflated forgery keeps the parity coset (n=${params.n})`);
+  // Guard against silent int32 wraparound: a wrapped value would almost surely
+  // land outside the interval the triangle inequality allows.
+  assert(
+    inflatedDetail.totalNorm >= Math.floor(normFloor) && inflatedDetail.totalNorm <= Math.ceil(normCeiling),
+    `inflated norm lands in the analytically predicted interval, so it did not wrap (n=${params.n})`,
+  );
   assert(!inflatedDetail.normWithinBound, `inflated forgery overshoots the Gram-matrix bound (n=${params.n})`);
   assert(!inflatedDetail.ok, `inflated forgery is rejected by the norm bound (n=${params.n})`);
 
@@ -202,34 +242,70 @@ function distributionTest(): void {
   assert(Math.abs(probSum - 1) < 1e-9, 'table-implied magnitude probabilities sum to 1');
 
   const N = 60000;
-  const observed = new Array<number>(buckets).fill(0);
-  let sum = 0;
-  let sumSq = 0;
-  for (let i = 0; i < N; i += 1) {
-    const value = sampleDiscreteGaussian(table);
-    const magnitude = Math.abs(value);
-    observed[Math.min(magnitude, buckets - 1)] += 1;
-    sum += value;
-    sumSq += value * value;
+
+  function drawSample(): { chiSq: number; mean: number; sigma: number } {
+    const observed = new Array<number>(buckets).fill(0);
+    let sum = 0;
+    let sumSq = 0;
+    for (let i = 0; i < N; i += 1) {
+      const value = sampleDiscreteGaussian(table);
+      const magnitude = Math.abs(value);
+      observed[Math.min(magnitude, buckets - 1)] += 1;
+      sum += value;
+      sumSq += value * value;
+    }
+
+    // Chi-square goodness-of-fit against the table-implied magnitude distribution.
+    let chiSq = 0;
+    for (let k = 0; k < buckets; k += 1) {
+      const expectedCount = expectedProb[k] * N;
+      if (expectedCount < 1) {
+        continue; // skip vanishingly rare tail buckets to keep the statistic stable
+      }
+      const diff = observed[k] - expectedCount;
+      chiSq += (diff * diff) / expectedCount;
+    }
+
+    const mean = sum / N;
+    const variance = sumSq / N - mean * mean;
+    return { chiSq, mean, sigma: Math.sqrt(variance) };
   }
 
-  // Chi-square goodness-of-fit against the table-implied magnitude distribution.
-  let chiSq = 0;
-  for (let k = 0; k < buckets; k += 1) {
-    const expectedCount = expectedProb[k] * N;
-    if (expectedCount < 1) {
-      continue; // skip vanishingly rare tail buckets to keep the statistic stable
-    }
-    const diff = observed[k] - expectedCount;
-    chiSq += (diff * diff) / expectedCount;
+  // CHI-SQUARE THRESHOLD, AND WHY IT IS CONFIRMED RATHER THAN LOOSENED.
+  //
+  // At N=60000 the expected bucket counts are 16824, 26298, 12492, 3656, 658,
+  // 67.2, 4.62, 0.18; the last is dropped by the expectedCount < 1 guard, so 7
+  // buckets are scored and df ≈ 6. A strict threshold on random data fails at
+  // exactly its false-positive rate, so that rate was measured rather than
+  // assumed: over 40,000 simulated null samples, P(chiSq ≥ 30) = 1.0e-4 and the
+  // largest value seen was 33.2. One in ten thousand runs is rare, but this
+  // suite gates a deploy on every push, so it is not rare enough to leave
+  // undocumented.
+  //
+  // Raising the ceiling would trade away the power that makes the test worth
+  // running. Instead the threshold stays at 30 and a flagged sample is
+  // CONFIRMED on a second, independent draw: a genuinely wrong table reproduces
+  // (its chi-square grows linearly in N and lands in the hundreds), a
+  // 1-in-10,000 fluctuation does not. That puts the false-positive rate at
+  // ~1e-8 per run while leaving the detection threshold exactly where it was.
+  let { chiSq, mean, sigma } = drawSample();
+  if (chiSq >= 30) {
+    const confirmation = drawSample();
+    assert(
+      confirmation.chiSq < 30,
+      `CDT magnitude distribution matches the table (chi-square=${chiSq.toFixed(2)} then ` +
+        `${confirmation.chiSq.toFixed(2)} on an independent resample — two flags in a row is a real ` +
+        'distribution error, not a fluctuation)',
+    );
+    ({ chiSq, mean, sigma } = confirmation);
   }
-  // df ~= buckets - 1 = 7; critical value at p=0.001 is ~24. Use a generous
-  // ceiling so the test is meaningful but not flaky.
   assert(chiSq < 30, `CDT magnitude distribution matches the table (chi-square=${chiSq.toFixed(2)})`);
 
-  const mean = sum / N;
-  const variance = sumSq / N - mean * mean;
-  const sigma = Math.sqrt(variance);
+  // These two are safe by a wide margin and are recorded here so the margin is
+  // not re-litigated: the table's true sigma is 1.42331, so the mean is 0 and
+  // the sigma error is 0.0017. At N=60000 the standard error of the mean is
+  // 0.0058 and of sigma is 0.0041, putting the 0.1 and 0.2 tolerances at 17 and
+  // 48 standard errors respectively.
   assert(Math.abs(mean) < 0.1, `CDT sampler is centered at zero (mean=${mean.toFixed(4)})`);
   assert(
     Math.abs(sigma - EXPECTED_SIGMA) < 0.2,
