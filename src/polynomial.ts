@@ -118,6 +118,65 @@ export function polyMul(a: Polynomial, b: Polynomial): Polynomial {
 }
 
 /**
+ * Same negacyclic product as `polyMul`, accumulated in float64 instead of
+ * Int32.
+ *
+ * `polyMul` is the right tool for basis and Gram-matrix arithmetic. It is a
+ * thin tool for the quadratic form c* Q c once c comes from a Gaussian coset
+ * sampler rather than a {0,1} reduction: measured at n = 512 with this build's
+ * σ ≈ 1.425 sampler, the second multiply's per-coefficient accumulator has a
+ * worst-case running sum near 5e7 against Int32's 2.1e9 ceiling — safe, but
+ * that ~40x margin is a function of the sampler width and the basis norm, and
+ * exceeding it would be silent: an Int32Array wraps without a signal, handing
+ * verification a wrong length to compare against its bound. Float64 holds every
+ * integer below 2^53 exactly, so this is the same integer arithmetic with three
+ * more orders of magnitude of headroom, not an approximation. Inputs must be
+ * integer-valued. `scripts/verify-phase5.ts` pins the result against a
+ * recomputation from the secret basis.
+ */
+export function polyMulExact(a: ArrayLike<number>, b: ArrayLike<number>): Float64Array {
+  if (a.length !== b.length) {
+    throw new Error(`Polynomial length mismatch: ${a.length} !== ${b.length}`);
+  }
+
+  const n = a.length;
+  const out = new Float64Array(n);
+
+  for (let left = 0; left < n; left += 1) {
+    const leftValue = a[left];
+    if (leftValue === 0) {
+      continue;
+    }
+
+    for (let right = 0; right < n; right += 1) {
+      const target = left + right;
+      const product = leftValue * b[right];
+
+      if (target < n) {
+        out[target] += product;
+      } else {
+        out[target - n] -= product;
+      }
+    }
+  }
+
+  return out;
+}
+
+/** `polyAdjoint` over float64 inputs, for use with `polyMulExact`. */
+export function polyAdjointExact(a: ArrayLike<number>): Float64Array {
+  const n = a.length;
+  const out = new Float64Array(n);
+  out[0] = a[0];
+
+  for (let index = 1; index < n; index += 1) {
+    out[index] = -a[n - index];
+  }
+
+  return out;
+}
+
+/**
  * Hermitian adjoint (conjugation) in R = Z[X]/(X^n + 1).
  *
  * The adjoint a* satisfies <a·u, v> = <u, a*·v> for the coefficient inner

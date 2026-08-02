@@ -1,5 +1,7 @@
 import {
   DISCRETE_GAUSSIAN_TABLE_T0,
+  DISCRETE_GAUSSIAN_TABLE_T1,
+  sampleDiscreteGaussian,
   simulateFalconFastFourierSamplingPass,
 } from './gaussian';
 import {
@@ -8,9 +10,11 @@ import {
   polyAdd,
   polyAddMod2,
   polyAdjoint,
+  polyAdjointExact,
   polyInvMod2,
   polyMod2,
   polyMul,
+  polyMulExact,
   polyMulMod2,
   type Polynomial,
 } from './polynomial';
@@ -275,6 +279,15 @@ function gramMatrix(
  * PUBLIC Gram matrix alone as the constant term of c* Q c. Because Q = B* B,
  * this equals ||B c||^2 exactly, so verification measures a signature's
  * length using only the public key — the heart of HAWK's verify identity.
+ *
+ * The triple products run through float64 accumulators (`polyMulExact`) rather
+ * than the Int32 `polyMul`. Both give identical results at this build's
+ * parameters, for the {0,1} coordinates of the linear solve and for the wider
+ * coordinates `solveCosetGaussian` produces; the reason for the wider register
+ * is headroom, since an Int32 wrap here would be silent and would hand the
+ * bound check a wrong length. `scripts/verify-phase5.ts` asserts this value
+ * equals ||B·c||² recomputed from the secret basis at Gaussian coordinate
+ * magnitudes.
  */
 function quadraticFormNorm(
   c0: Polynomial,
@@ -283,12 +296,11 @@ function quadraticFormNorm(
   q01: Polynomial,
   q11: Polynomial,
 ): number {
-  const t00 = polyMul(polyMul(polyAdjoint(c0), q00), c0);
-  const t01 = polyMul(polyMul(polyAdjoint(c0), q01), c1);
-  const t10 = polyMul(polyMul(polyAdjoint(c1), polyAdjoint(q01)), c0);
-  const t11 = polyMul(polyMul(polyAdjoint(c1), q11), c1);
-  const sum = polyAdd(polyAdd(t00, t01), polyAdd(t10, t11));
-  return sum[0];
+  const t00 = polyMulExact(polyMulExact(polyAdjointExact(c0), q00), c0);
+  const t01 = polyMulExact(polyMulExact(polyAdjointExact(c0), q01), c1);
+  const t10 = polyMulExact(polyMulExact(polyAdjointExact(c1), polyAdjointExact(q01)), c0);
+  const t11 = polyMulExact(polyMulExact(polyAdjointExact(c1), q11), c1);
+  return t00[0] + t01[0] + t10[0] + t11[0];
 }
 
 /**
@@ -464,6 +476,7 @@ export async function hawkSign(
   message: Uint8Array,
   privateKey: HAWKPrivateKey,
   boundOverride?: number,
+  saltOverride?: Uint8Array,
 ): Promise<{
   signature: HAWKSignature;
   signingTimeMs: number;
@@ -493,8 +506,13 @@ export async function hawkSign(
   // coset vector exceeds the length bound. At the default bound that never
   // happens; lower the bound and this becomes a live rejection loop.
   while (restartCount < 8) {
-    const salt = new Uint8Array(getSaltBytes(params));
-    getCrypto().getRandomValues(salt);
+    // A caller-supplied salt makes the run reproducible, which is exactly what
+    // the sampler-gap bench needs in order to measure that this signer is a
+    // deterministic function of (message, salt).
+    const salt = saltOverride ?? new Uint8Array(getSaltBytes(params));
+    if (!saltOverride) {
+      getCrypto().getRandomValues(salt);
+    }
 
     const { h0, h1 } = await hashToParityTarget(message, salt, privateKey.pubKeyHash, privateKey.n);
 
@@ -508,6 +526,10 @@ export async function hawkSign(
 
     if (norm > bound) {
       restartCount += 1;
+      // A pinned salt makes every retry identical, so retrying is pointless.
+      if (saltOverride) {
+        break;
+      }
       continue;
     }
 
@@ -524,8 +546,8 @@ export async function hawkSign(
   }
 
   throw new Error(
-    `HAWK signing restarted 8 times without landing under the acceptance bound (${bound.toLocaleString()}). ` +
-      'That is the norm-rejection loop doing its job: every fresh salt produced a coset vector longer than the bound you set. ' +
+    `HAWK signing restarted ${restartCount} time(s) without landing under the acceptance bound (${bound.toLocaleString()}). ` +
+      'That is the norm-rejection loop doing its job: every salt produced a coset vector longer than the bound you set. ' +
       'Raise the bound to sign again.',
   );
 }
@@ -591,6 +613,212 @@ export async function hawkForgeFromPublicKey(
   }
 
   throw new Error('Forgery restarted too many times: the acceptance bound is below the coset norm.');
+}
+
+/* ---------------------------------------------------------------------------
+ * The two coset solvers, exposed side by side.
+ *
+ * Both take ONLY the public key, which is the whole point: they are the two
+ * candidate answers to "given the message's parity target h, produce integer
+ * coordinates c with (B mod 2)·c = h". The first is what this build's signer
+ * runs. The second layers a real discrete-Gaussian offset on top of it, drawn
+ * from HAWK's signing-time table T_1, and is the closest this build gets to
+ * production HAWK's Gaussian coset sampler.
+ *
+ * They are exported so `src/sampler-gap.ts` can measure the difference between
+ * them rather than describe it. The measurement that matters is the one that
+ * comes out negative: the Gaussian offset removes reproducibility and integer
+ * linearity, and does *not* remove forgeability, because 2z ≡ 0 (mod 2) leaves
+ * the parity coset — the only thing the forger needs — untouched.
+ * ------------------------------------------------------------------------ */
+
+export interface CosetCoordinates {
+  c0: Polynomial;
+  c1: Polynomial;
+}
+
+function parityInverseFromPublicKey(publicKey: HAWKPublicKey) {
+  const { f, g, F, G } = publicKey.basisMod2;
+  const parityInverse = invertParityBasis(f, g, F, G);
+  if (!parityInverse) {
+    throw new Error('The published parity basis is not invertible mod 2.');
+  }
+  return parityInverse;
+}
+
+/**
+ * The linear solve this build's `hawkSign` performs: c = (B mod 2)^{-1} h,
+ * giving coordinates in {0,1}. Deterministic in h, and linear over GF(2).
+ */
+export function solveCosetLinear(
+  publicKey: HAWKPublicKey,
+  h0: Polynomial,
+  h1: Polynomial,
+): CosetCoordinates {
+  const parityInverse = parityInverseFromPublicKey(publicKey);
+  return {
+    c0: polyAddMod2(polyMulMod2(parityInverse.a, h0), polyMulMod2(parityInverse.b, h1)),
+    c1: polyAddMod2(polyMulMod2(parityInverse.c, h0), polyMulMod2(parityInverse.d, h1)),
+  };
+}
+
+/**
+ * The same solve with a real discrete-Gaussian coset offset: c' = c + 2z with
+ * every z_i drawn from HAWK's signing table T_1 through the same constant-time
+ * CDT walk the sampler exhibit shows. Adding 2z preserves c' ≡ c (mod 2), so
+ * the parity coset — and therefore the verifier's message binding — is intact,
+ * while the integer coordinates are now randomised per signature.
+ *
+ * This is a genuine discrete-Gaussian coset sampler over the parity coset. It
+ * is NOT production HAWK's sampler, which samples over the lattice coset with
+ * a covariance tied to the secret basis and a width derived from the parameter
+ * set. Labelled as such wherever it is displayed.
+ */
+export function solveCosetGaussian(
+  publicKey: HAWKPublicKey,
+  h0: Polynomial,
+  h1: Polynomial,
+): CosetCoordinates & { gaussianDraws: number } {
+  const base = solveCosetLinear(publicKey, h0, h1);
+  const c0 = new Int32Array(base.c0);
+  const c1 = new Int32Array(base.c1);
+
+  for (let index = 0; index < c0.length; index += 1) {
+    c0[index] += 2 * sampleDiscreteGaussian(DISCRETE_GAUSSIAN_TABLE_T1);
+    c1[index] += 2 * sampleDiscreteGaussian(DISCRETE_GAUSSIAN_TABLE_T1);
+  }
+
+  return { c0, c1, gaussianDraws: c0.length + c1.length };
+}
+
+/** The hash of a public key, as the signer and the verifier both derive it. */
+export async function hawkPublicKeyHash(publicKey: HAWKPublicKey): Promise<Uint8Array> {
+  return hashPublicKey(publicKey);
+}
+
+/** The message's parity target h = (h0, h1), derived from public data only. */
+export async function hawkParityTarget(
+  message: Uint8Array,
+  salt: Uint8Array,
+  pubKeyHash: Uint8Array,
+  n: number,
+): Promise<{ h0: Polynomial; h1: Polynomial }> {
+  return hashToParityTarget(message, salt, pubKeyHash, n);
+}
+
+/** The salt width for a parameter set, so callers can pin a salt. */
+export function hawkSaltBytes(n: number): number {
+  return getSaltBytes(getParamsForN(n));
+}
+
+/** ||B·c||² from the public Gram matrix alone, for any candidate coordinates. */
+export function hawkCosetNorm(publicKey: HAWKPublicKey, coordinates: CosetCoordinates): number {
+  return quadraticFormNorm(
+    coordinates.c0,
+    coordinates.c1,
+    publicKey.q00,
+    publicKey.q01,
+    publicKey.q11,
+  );
+}
+
+/**
+ * Sign with the Gaussian coset sampler instead of the bare linear solve.
+ *
+ * Takes the private key for symmetry with `hawkSign` and — exactly like
+ * `hawkSign` — reads nothing from it beyond what the public key publishes. The
+ * bench uses that fact: the matching `hawkForgeGaussianCoset` below runs the
+ * identical sampler from the public key alone, and the unmodified verifier
+ * accepts both.
+ */
+export async function hawkSignGaussianCoset(
+  message: Uint8Array,
+  privateKey: HAWKPrivateKey,
+  publicKey: HAWKPublicKey,
+  boundOverride?: number,
+  saltOverride?: Uint8Array,
+): Promise<{
+  signature: HAWKSignature;
+  signingTimeMs: number;
+  restartCount: number;
+  gaussianDraws: number;
+}> {
+  const startedAt = nowMs();
+  const bound = verificationBound(privateKey.n, boundOverride);
+  let restartCount = 0;
+  let draws = 0;
+
+  while (restartCount < 8) {
+    const salt = saltOverride ?? new Uint8Array(hawkSaltBytes(privateKey.n));
+    if (!saltOverride) {
+      getCrypto().getRandomValues(salt);
+    }
+
+    const { h0, h1 } = await hashToParityTarget(message, salt, privateKey.pubKeyHash, privateKey.n);
+    const coordinates = solveCosetGaussian(publicKey, h0, h1);
+    draws += coordinates.gaussianDraws;
+    const norm = hawkCosetNorm(publicKey, coordinates);
+
+    if (norm > bound) {
+      restartCount += 1;
+      continue;
+    }
+
+    return {
+      signature: { salt, c0: coordinates.c0, s1: coordinates.c1, n: privateKey.n },
+      signingTimeMs: nowMs() - startedAt,
+      restartCount,
+      gaussianDraws: draws,
+    };
+  }
+
+  throw new Error(
+    `Gaussian-coset signing restarted ${restartCount} time(s) without landing under the acceptance bound ` +
+      `(${bound.toLocaleString()}). A Gaussian coset offset makes signatures measurably longer than the bare ` +
+      'mod-2 representative, so the bound and the sampler width are coupled — raise the bound to sign this way.',
+  );
+}
+
+/**
+ * Forge with the Gaussian coset sampler, from the public key alone.
+ *
+ * The existence of this function is the exhibit: if adding a Gaussian to the
+ * sampler were what stops forgery, this could not be written. It can, because
+ * the offset is a multiple of 2 and the forger's obstacle is the parity coset.
+ */
+export async function hawkForgeGaussianCoset(
+  message: Uint8Array,
+  publicKey: HAWKPublicKey,
+  boundOverride?: number,
+  saltOverride?: Uint8Array,
+): Promise<{ signature: HAWKSignature; forgeTimeMs: number; restartCount: number }> {
+  const startedAt = nowMs();
+  const pubKeyHash = await hashPublicKey(publicKey);
+  const bound = verificationBound(publicKey.n, boundOverride);
+  let restartCount = 0;
+
+  while (restartCount < 8) {
+    const salt = saltOverride ?? new Uint8Array(hawkSaltBytes(publicKey.n));
+    if (!saltOverride) {
+      getCrypto().getRandomValues(salt);
+    }
+
+    const { h0, h1 } = await hashToParityTarget(message, salt, pubKeyHash, publicKey.n);
+    const coordinates = solveCosetGaussian(publicKey, h0, h1);
+
+    if (hawkCosetNorm(publicKey, coordinates) > bound) {
+      restartCount += 1;
+      continue;
+    }
+
+    return {
+      signature: { salt, c0: coordinates.c0, s1: coordinates.c1, n: publicKey.n },
+      forgeTimeMs: nowMs() - startedAt,
+      restartCount,
+    };
+  }
+
+  throw new Error('Gaussian-coset forgery restarted too many times: the acceptance bound is below the coset norm.');
 }
 
 export interface HAWKVerifyDetail {

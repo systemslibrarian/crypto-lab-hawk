@@ -8,16 +8,23 @@ import { type Polynomial } from './polynomial';
  * below is a faithful model of how they are used: one uniform word, a fixed
  * number of threshold comparisons, no early exit, no floating point.
  *
- * WHERE THIS BUILD DIVERGES: in this build only T_0 is on a real cryptographic
- * path — `sampleBasis` in hawk.ts uses it to draw f, g, F, G during key
- * generation. T_1 is NOT reached by `hawkSign`. This build's signing path
- * substitutes a mod-2 linear solve for HAWK's Gaussian coset sampler (see the
- * honesty note on `hawkSign`), so there is no signing-time Gaussian draw for
- * T_1 to serve. T_1 is therefore exhibited standalone in Exhibit 2 — the
- * histogram, the timing race against the Falcon-style sampler, and the
- * step-through walk are all real samples from a real CDT, they are simply not
- * feeding this build's signatures. Do not read Exhibit 2 as a trace of what
- * happened when you pressed "sign".
+ * WHERE THIS BUILD DIVERGES: `sampleBasis` in hawk.ts uses T_0 to draw f, g, F,
+ * G during key generation, so T_0 is on the real keygen path. T_1 is NOT
+ * reached by `hawkSign`: this build's default signing path substitutes a mod-2
+ * linear solve for HAWK's Gaussian coset sampler (see the honesty note on
+ * `hawkSign`), so there is no default signing-time Gaussian draw for T_1 to
+ * serve. T_1 is therefore exhibited standalone in Exhibit 2 — the histogram,
+ * the timing race against the Falcon-style sampler, and the step-through walk
+ * are all real samples from a real CDT, they are simply not feeding this
+ * build's default signatures. Do not read Exhibit 2 as a trace of what happened
+ * when you pressed "sign".
+ *
+ * T_1 does drive one real signing path. `solveCosetGaussian` in hawk.ts draws
+ * one T_1 sample per coordinate coefficient to build a discrete-Gaussian coset
+ * representative, and Exhibit 3's sampler-gap bench signs, forges and verifies
+ * with it so the difference between the two samplers is measured rather than
+ * described. It is a Gaussian over the *parity* coset, not production HAWK's
+ * Gaussian over the lattice coset with a basis-dependent covariance.
  */
 
 export const EXPECTED_SIGMA = 1.425;

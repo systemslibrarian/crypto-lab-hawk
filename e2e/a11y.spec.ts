@@ -49,6 +49,22 @@ async function revealEverything(page: Page): Promise<void> {
   });
 }
 
+/**
+ * Exhibit 3's signing log, tamper result, forgery result and sampler-gap table
+ * only exist after their buttons are pressed. Without driving them, the largest
+ * block of injected markup on the page is never seen by axe at all.
+ */
+async function driveExhibitThree(page: Page): Promise<void> {
+  await page.click('[data-action="run-signing"]');
+  await page.waitForSelector('[data-action="sampler-gap"]', { timeout: 120_000 });
+  await page.click('[data-action="tamper-signature"]');
+  await page.waitForSelector('[data-action="tamper-reset"]', { timeout: 120_000 });
+  await page.click('[data-action="forge-signature"]');
+  await page.waitForSelector('[data-action="forge-reset"]', { timeout: 120_000 });
+  await page.click('[data-action="sampler-gap"]');
+  await page.waitForSelector('[data-action="sampler-gap-reset"]', { timeout: 180_000 });
+}
+
 async function scan(page: Page): Promise<void> {
   const results = await new AxeBuilder({ page }).withTags(TAGS).analyze();
   const summary = results.violations.map((v) => ({
@@ -61,15 +77,19 @@ async function scan(page: Page): Promise<void> {
 }
 
 test('no WCAG A/AA violations in dark theme', async ({ page }) => {
+  test.slow();
   await page.goto('.');
+  await driveExhibitThree(page);
   await revealEverything(page);
   await scan(page);
 });
 
 test('no WCAG A/AA violations in light theme', async ({ page }) => {
+  test.slow();
   await page.goto('.');
   await page.locator('#cl-theme-toggle').click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await driveExhibitThree(page);
   await revealEverything(page);
   await scan(page);
 });

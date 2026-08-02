@@ -26,6 +26,7 @@ import {
   type HAWKVerifyDetail,
 } from './hawk';
 import { HAWK_512_PARAMS, HAWK_1024_PARAMS } from './polynomial';
+import { runSamplerGap, type SamplerGapReport } from './sampler-gap';
 
 type SchemeKey = 'falcon' | 'mldsa' | 'hawk';
 type ParamKey = '512' | '1024';
@@ -64,6 +65,7 @@ type SigningState = {
     forgeTimeMs: number;
     matchesGenuineCoordinates: boolean;
   } | null;
+  samplerGap: SamplerGapReport | null;
   verifyDetail: HAWKVerifyDetail;
   signature: HAWKSignature;
   publicKey: HAWKPublicKey;
@@ -278,6 +280,7 @@ const state: {
   busySigning: boolean;
   busyTamper: boolean;
   busyForge: boolean;
+  busySamplerGap: boolean;
   boundOverride: number | null;
   message: string;
   theme: 'dark' | 'light';
@@ -300,6 +303,7 @@ const state: {
   busySigning: false,
   busyTamper: false,
   busyForge: false,
+  busySamplerGap: false,
   boundOverride: null,
   message: localStorage.getItem('hawk-message') ?? 'Release firmware v2.3.1 on 2026-04-19',
   theme: (document.documentElement.getAttribute('data-theme') as 'dark' | 'light' | null) ?? 'dark',
@@ -693,6 +697,10 @@ function signingMarkup(): string {
       <div>
         <span class="eyebrow">Forge with only the public key</span>
         ${forgeMarkup()}
+      </div>
+      <div>
+        <span class="eyebrow">Sampler gap: would a real Gaussian have saved it?</span>
+        ${samplerGapMarkup()}
       </div>
       <div>
         <span class="eyebrow">Export</span>
@@ -1129,7 +1137,7 @@ function transparencyMarkup(): string {
           <h3>Simplified</h3>
           <ul>
             <li>Keygen models the NTRU solvability condition as “the parity basis is invertible mod 2,” which forces the same retry story without solving the full f·G − g·F = q equation over the integers.</li>
-            <li>Exhibit 2’s CDT walk uses table T1, which production HAWK reaches during signing. This build’s signing path never calls it — T1 is exhibited standalone. T0 is on the real keygen path.</li>
+            <li>Exhibit 2’s CDT walk uses table T1, which production HAWK reaches during signing. This build’s <em>default</em> signing path never calls it. T1 is on a real path in two places: Exhibit 2 itself, and the Gaussian column of the sampler-gap bench in Exhibit 3, which draws one T1 sample per coordinate coefficient. T0 is on the real keygen path.</li>
             <li>The acceptance bound is a demo constant sitting roughly 12x above where genuine signatures land, which is why the restart counter reads 0 by default. Exhibit 3 exposes it as a slider so you can push it into the range where the loop actually fires. Production bounds are derived from the parameter set and the sampler’s tail.</li>
             <li>Byte sizes are far off spec: this build’s serializers are uncompressed and it transmits four polynomials production HAWK does not transmit at all. Exhibit 3 shows measured and spec figures side by side.</li>
           </ul>
@@ -1140,7 +1148,7 @@ function transparencyMarkup(): string {
             <li><strong>This build's signing has no trapdoor.</strong> <code>hawkSign</code> takes the private key as an argument but reads nothing from it that the public key does not already publish: the parity basis B mod 2 (shipped verbatim as <code>publicKey.basisMod2</code>) and the Gram matrix Q. Anyone holding only the public key can recompute identical signature coordinates, and the real verifier accepts them. Press <em>Forge with only the public key</em> in Exhibit 3 and watch it happen.</li>
             <li>Earlier versions of this page said a passing length check proved “the signer knew the secret short basis.” That was wrong, and it has been corrected rather than quietly dropped.</li>
             <li>Two things would be needed to fix it properly, and neither is a small edit: keygen would have to solve the NTRU equation f·G − g·F = 1 so the basis is unimodular and B<sup>-1</sup> is integral, and the public key would have to drop the parity basis, with the verifier recovering the coset by rational rounding against q00/q01 instead. This build samples f, g, F, G independently and is integer-only by design, so it does neither.</li>
-            <li>Adding a Gaussian offset to the coordinate vector would not have fixed this. The forgeability comes from publishing B mod 2 and from a verifier that accepts anything in the coset under a slack bound — not from the sampler.</li>
+            <li>Adding a Gaussian offset to the coordinate vector would not have fixed this, and that is now measured rather than asserted: the <em>sampler gap</em> bench in Exhibit 3 runs both samplers against the live key and reports that the Gaussian moves four of five structural properties and leaves forgeability untouched. The one property it does not move is additivity mod 2 — the offset is a multiple of 2, so the parity coset survives, and the parity coset is all the forger needs.</li>
             <li>What the demo still teaches honestly: HAWK's verification identity (‖B·c‖² = c*·Q·c from the public Gram matrix alone), its coset message binding, its integer-only CDT sampler, and — now — what a signature scheme looks like when the signer's advantage over the public is zero.</li>
           </ul>
         </article>
@@ -1254,7 +1262,7 @@ function verifyMathMarkup(): string {
       <p class="mini-note">Verification never sees the secret short basis. It uses only the public key: it rebuilds the message’s parity target, checks the signature’s lattice coset against it with the public parity basis (via polynomial multiplication mod 2), and measures the lattice point’s length with the public Gram matrix Q = B*B (c*·Q·c). Flipping any coefficient breaks the coset match, and a foreign key has a different Q, so both checks genuinely depend on the lattice — try the tamper test below.</p>
       <div class="honesty-callout" role="note">
         <strong>Passing these two checks does not prove the signer held the secret.</strong>
-        <p>An earlier version of this page said it did. It is not true of this build. Both checks above are computed from the public key — and so is the signature, because this build’s signing path uses nothing from the private key that the public key does not already publish (the parity basis B mod 2, and the Gram matrix Q). Production HAWK closes that gap by never publishing B mod 2 and by sampling the coset with a Gaussian over the real short basis; this build does neither. The “Forge with only the public key” button below is not a simulation — it runs the same verifier you just watched pass, on a signature produced without any private key in scope.</p>
+        <p>An earlier version of this page said it did. It is not true of this build. Both checks above are computed from the public key — and so is the signature, because this build’s signing path uses nothing from the private key that the public key does not already publish (the parity basis B mod 2, and the Gram matrix Q). Production HAWK closes that gap by never publishing B mod 2 and by sampling the coset with a Gaussian over the real short basis; this build does neither. The “Forge with only the public key” button below is not a simulation — it runs the same verifier you just watched pass, on a signature produced without any private key in scope. Of those two missing pieces only one is load-bearing, and the <em>sampler gap</em> bench under the forgery measures which: it adds a real discrete-Gaussian coset sampler to this build and reports that the forgery survives it.</p>
       </div>
     </div>
   `;
@@ -1291,6 +1299,106 @@ function forgeMarkup(): string {
       <p class="mono-block">‖B·c‖² = ${Number.isNaN(forged.norm) ? '—' : forged.norm.toLocaleString()} ${forged.verified ? '≤' : '>'} bound ${forged.bound.toLocaleString()} &nbsp;·&nbsp; coset match: ${forged.identityHolds ? 'yes' : 'no'} &nbsp;·&nbsp; forged in ${formatMs(forged.forgeTimeMs)}</p>
       <p class="mini-note">What real HAWK does differently: its public key is (q00, q01) only. The verifier recovers the signature’s coset by a rational rounding step against q00/q01 instead of applying a published parity basis, so an attacker never learns B mod 2 — and without it there is no linear solve to run. Reproducing that here would need keygen to solve the NTRU equation f·G − g·F = 1 so the basis is unimodular; this build samples f, g, F, G independently and does not.</p>
       <button class="ghost-button" type="button" data-action="forge-reset">Clear forgery result</button>
+    </div>
+  `;
+}
+
+/**
+ * The sampler-gap bench.
+ *
+ * The honesty panel has always *said* that layering a Gaussian coset offset on
+ * this build's mod-2 solve would not restore unforgeability. This runs both
+ * samplers against the live key and prints what they measured, so the claim is
+ * checkable instead of trusted. Nothing in this markup is a constant: every
+ * figure comes out of `runSamplerGap`.
+ */
+function samplerGapMarkup(): string {
+  if (!state.signing) {
+    return '';
+  }
+
+  const report = state.signing.samplerGap;
+
+  if (!report) {
+    return `
+      <div class="tamper-row">
+        <button class="ghost-button" type="button" data-action="sampler-gap" ${state.busySamplerGap ? 'disabled' : ''} aria-busy="${state.busySamplerGap}">${state.busySamplerGap ? 'Measuring...' : 'Measure the sampler gap'}</button>
+        <span class="mini-note">Runs this build's mod-2 linear solve and a real discrete-Gaussian coset sampler (drawn from HAWK's signing table T₁) against the same key and message, then measures five structural properties and forges against each. Takes a few seconds.</span>
+      </div>
+    `;
+  }
+
+  const [linear, gaussian] = report.columns;
+  const pct = (value: number, total: number) => `${((value / total) * 100).toFixed(1)}%`;
+
+  const rows: Array<{ label: string; linear: string; gaussian: string }> = [
+    {
+      label: 'Two signings of one (message, salt) differ in',
+      linear: `${linear.reproducibilityDiff} of ${linear.coefficientCount} coefficients`,
+      gaussian: `${gaussian.reproducibilityDiff} of ${gaussian.coefficientCount} coefficients`,
+    },
+    {
+      label: 'c(hₐ ⊕ h_b) = c(hₐ) ⊕ c(h_b) over Z',
+      linear: `${linear.linearOverZMatches} of ${linear.coefficientCount} (${pct(linear.linearOverZMatches, linear.coefficientCount)})`,
+      gaussian: `${gaussian.linearOverZMatches} of ${gaussian.coefficientCount} (${pct(gaussian.linearOverZMatches, gaussian.coefficientCount)})`,
+    },
+    {
+      label: '…the same comparison mod 2',
+      linear: `${linear.linearMod2Matches} of ${linear.coefficientCount} (${pct(linear.linearMod2Matches, linear.coefficientCount)})`,
+      gaussian: `${gaussian.linearMod2Matches} of ${gaussian.coefficientCount} (${pct(gaussian.linearMod2Matches, gaussian.coefficientCount)})`,
+    },
+    {
+      label: 'Distinct coefficient values · entropy',
+      linear: `${linear.distinctValues} · ${linear.entropyBitsPerCoefficient.toFixed(2)} bits/coef`,
+      gaussian: `${gaussian.distinctValues} · ${gaussian.entropyBitsPerCoefficient.toFixed(2)} bits/coef`,
+    },
+    {
+      label: `Mean ‖B·c‖² over ${report.samples} salts`,
+      linear: Math.round(linear.meanNorm).toLocaleString(),
+      gaussian: `${Math.round(gaussian.meanNorm).toLocaleString()} (${report.normInflation.toFixed(1)}×)`,
+    },
+    {
+      label: 'Public-key-only forgery, judged by the unmodified verifier',
+      linear: linear.forgeryAccepted ? 'ACCEPTED' : 'rejected',
+      gaussian: gaussian.forgeryAccepted ? 'ACCEPTED' : 'rejected',
+    },
+  ];
+
+  const body = rows
+    .map(
+      (row) => `
+        <tr>
+          <th scope="row">${row.label}</th>
+          <td>${escapeHtml(row.linear)}</td>
+          <td class="compare-hawk">${escapeHtml(row.gaussian)}</td>
+        </tr>`,
+    )
+    .join('');
+
+  const verdict = report.bothForgeable
+    ? `The Gaussian offset moved ${report.changedProperties} of the ${report.comparedProperties} structural properties above — and left forgeability exactly where it was. Both columns were forged from the public key alone and accepted by the same unmodified verifier.`
+    : `Measured this run: forgery accepted under the linear solve = ${linear.forgeryAccepted ? 'yes' : 'no'}, under the Gaussian sampler = ${gaussian.forgeryAccepted ? 'yes' : 'no'}. ${report.changedProperties} of ${report.comparedProperties} structural properties changed.`;
+
+  return `
+    <div class="forge-result" role="status">
+      <strong>Sampler gap measured in ${formatMs(report.elapsedMs)} at n = ${report.n}</strong>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="Sampler gap measurements (scroll horizontally to see all columns)">
+        <table class="compare-table">
+          <caption class="sr-only">Five structural properties and the forgery outcome, measured for this build's mod-2 linear solve and for a discrete-Gaussian coset sampler, against the same key and message.</caption>
+          <thead>
+            <tr>
+              <th scope="col">Measured property</th>
+              <th scope="col">This build: mod-2 linear solve</th>
+              <th scope="col" class="compare-hawk">+ discrete-Gaussian coset offset (T₁)</th>
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+      <p>${escapeHtml(verdict)}</p>
+      <p class="mono-block">forged ‖B·c‖²: linear ${Math.round(linear.forgeryNorm).toLocaleString()} ≤ ${linear.boundUsed.toLocaleString()} · Gaussian ${Math.round(gaussian.forgeryNorm).toLocaleString()} ≤ ${gaussian.boundUsed.toLocaleString()} · coset match ${linear.forgeryCosetHolds ? 'yes' : 'no'} / ${gaussian.forgeryCosetHolds ? 'yes' : 'no'}</p>
+      <p class="mini-note">Read the third row first: it is the one the Gaussian offset does <em>not</em> change. The offset is a multiple of 2, so c stays in the same parity coset and the map h ↦ c stays exactly additive mod 2 — and the parity coset is the only thing a forger holding <code>publicKey.basisMod2</code> needs. That is why the fix for forgeability is not a better sampler but a smaller public key: production HAWK publishes (q00, q01) and never B mod 2. Each column is judged under a bound derived from its own measured norms (1.25× the largest observed), because a Gaussian coset representative is genuinely longer than the bare {0,1} one — sampler width and acceptance bound are coupled. The Gaussian sampler here draws real integers from table T₁ through the same CDT walk Exhibit 2 steps through; it is a discrete Gaussian over the parity coset, not production HAWK's sampler over the lattice coset with a basis-dependent covariance.</p>
+      <button class="ghost-button" type="button" data-action="sampler-gap-reset">Clear sampler-gap result</button>
     </div>
   `;
 }
@@ -1604,7 +1712,7 @@ no transcendental functions anywhere</pre>
         </div>
         <div class="honesty-callout" role="note">
           <strong>This is HAWK's sampler, shown standalone.</strong>
-          <p>Everything below is a real CDT: real draws from table T1, a fixed number of threshold comparisons per draw, no early exit, no floating point. What it is <em>not</em> is a trace of this build's signing path. This build substitutes a mod-2 linear solve for HAWK's Gaussian coset sampler, so pressing "sign" in Exhibit 3 never calls this code. T0 does run for real — it draws f, g, F, G during key generation. T1 runs only here.</p>
+          <p>Everything below is a real CDT: real draws from table T1, a fixed number of threshold comparisons per draw, no early exit, no floating point. What it is <em>not</em> is a trace of this build's default signing path. This build substitutes a mod-2 linear solve for HAWK's Gaussian coset sampler, so pressing "sign" in Exhibit 3 never calls this code. T0 does run for real — it draws f, g, F, G during key generation. T1 runs here and in the Gaussian column of Exhibit 3's sampler-gap bench, which layers a real T1 draw onto every coordinate coefficient and then measures what that does and does not fix.</p>
         </div>
         <div class="panel-actions">
           <button class="primary-button" type="button" data-action="sample-gaussian" ${state.busyGaussian ? 'disabled' : ''} aria-busy="${state.busyGaussian}">${state.busyGaussian ? 'Sampling...' : 'Sample both distributions (4,096 draws each)'}</button>
@@ -1863,6 +1971,7 @@ async function runSigningDemo(reuseKeys = false): Promise<void> {
       bound,
       tampered: null,
       forged: null,
+      samplerGap: null,
       verifyDetail,
       signature,
       publicKey,
@@ -1973,6 +2082,46 @@ async function runForgeDemo(): Promise<void> {
   }
 }
 
+/**
+ * Run the sampler-gap bench against the live key.
+ *
+ * This is the one control on the page whose result the honesty panel had
+ * previously only asserted. It answers the obvious follow-up to the forgery
+ * demo — "so add a Gaussian and it would be fine, right?" — by running both
+ * samplers and measuring. It reads the private key only to sign under each
+ * sampler; the forgeries inside it never see one.
+ */
+async function runSamplerGapDemo(): Promise<void> {
+  if (!state.signing) {
+    return;
+  }
+
+  state.busySamplerGap = true;
+  setStatusMessage(null);
+  setLiveMessage('Measuring the gap between this build’s linear coset solve and a real discrete-Gaussian coset sampler.');
+  render();
+
+  try {
+    const report = await runSamplerGap(
+      state.signing.privateKey,
+      state.signing.publicKey,
+      state.message,
+    );
+    state.signing.samplerGap = report;
+    setLiveMessage(
+      report.bothForgeable
+        ? `Sampler gap measured: ${report.changedProperties} of ${report.comparedProperties} structural properties changed, and both samplers were still forged from the public key alone.`
+        : `Sampler gap measured: ${report.changedProperties} of ${report.comparedProperties} structural properties changed.`,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Sampler-gap measurement failed.';
+    setStatusMessage(message);
+  } finally {
+    state.busySamplerGap = false;
+    render();
+  }
+}
+
 function bindEvents(): void {
   document.querySelectorAll<HTMLButtonElement>('[data-scheme]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -2066,6 +2215,20 @@ function bindEvents(): void {
     if (state.signing) {
       state.signing.forged = null;
       setPendingFocus('[data-action="forge-signature"]');
+      render();
+    }
+  });
+
+  const samplerGapButton = document.querySelector<HTMLButtonElement>('[data-action="sampler-gap"]');
+  samplerGapButton?.addEventListener('click', () => {
+    void runSamplerGapDemo();
+  });
+
+  const samplerGapReset = document.querySelector<HTMLButtonElement>('[data-action="sampler-gap-reset"]');
+  samplerGapReset?.addEventListener('click', () => {
+    if (state.signing) {
+      state.signing.samplerGap = null;
+      setPendingFocus('[data-action="sampler-gap"]');
       render();
     }
   });
