@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const PORT = 4220;
+const PORT = 4648;
 const BASE = '/crypto-lab-hawk/';
 
 export default defineConfig({
