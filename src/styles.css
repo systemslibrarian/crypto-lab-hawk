@@ -147,10 +147,17 @@ button:disabled {
 .cl-hero-title{margin:0;font-size:clamp(1.6rem,3.8vw,2.7rem);font-weight:700;line-height:1.1;letter-spacing:.01em;}
 .cl-hero-sub{margin:.4rem 0 0;font-size:clamp(.9rem,1.6vw,1.05rem);letter-spacing:.01em;opacity:.85;}
 .cl-hero-desc{margin:.55rem 0 0;font-size:1rem;line-height:1.5;color:var(--muted);max-width:60ch;}
-.cl-hero-why{flex:0 1 min(40%,26rem);min-width:min(100%,15rem);border:1px solid var(--line);border-radius:10px;padding:.85rem 1.05rem;background:color-mix(in oklab,var(--cyan) 6%,transparent);}
+/* Right-hand hero column: the withdrawal notice sits above "why it matters",
+   so the first thing read after the description is that HAWK is out. */
+.cl-hero-side{flex:0 1 min(40%,26rem);min-width:min(100%,15rem);display:flex;flex-direction:column;gap:.7rem;}
+.cl-hero-why{flex:1 1 auto;min-width:0;border:1px solid var(--line);border-radius:10px;padding:.85rem 1.05rem;background:color-mix(in oklab,var(--cyan) 6%,transparent);}
 .cl-hero-why-label{display:block;font-size:.68rem;font-weight:700;letter-spacing:.14em;}
 .cl-hero-why-text{margin:.35rem 0 0;font-size:.95rem;line-height:1.5;}
-@media (max-width:640px){.cl-hero{flex-direction:column;}.cl-hero-why{flex-basis:auto;width:100%;}.cl-hero-main{flex-basis:auto;min-width:0;}}
+.cl-hero-withdrawn{border:1px solid color-mix(in srgb,var(--magenta) 50%,transparent);border-left-width:4px;border-radius:10px;padding:.85rem 1.05rem;background:color-mix(in srgb,var(--magenta) 12%,transparent);}
+.withdrawn-flag{display:inline-block;font-size:.68rem;font-weight:700;letter-spacing:.14em;color:var(--magenta);}
+.cl-hero-withdrawn p{margin:.35rem 0 0;font-size:.92rem;line-height:1.5;color:var(--text);}
+.cl-hero-withdrawn a{color:var(--magenta);font-weight:600;white-space:nowrap;}
+@media (max-width:640px){.cl-hero{flex-direction:column;}.cl-hero-side{flex-basis:auto;width:100%;}.cl-hero-main{flex-basis:auto;min-width:0;}}
 
 .hero-meta {
   display: flex;
@@ -220,6 +227,14 @@ button:disabled {
 .hero h1 {
   font-size: clamp(2.8rem, 6vw, 5.4rem);
   max-width: 12ch;
+}
+
+/* Exhibit 1.5 is an interstitial between exhibits 1 and 2, and carries the
+   longest heading on the page. Size it a step below the full-exhibit titles so
+   it reads as a sub-exhibit rather than competing with them. */
+#exhibit-lip .section-heading h2 {
+  font-size: 1.25rem;
+  line-height: 1.2;
 }
 
 .lede,

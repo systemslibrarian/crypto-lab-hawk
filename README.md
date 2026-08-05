@@ -2,9 +2,9 @@
 
 ## What It Is
 
-Browser-based educational demo of HAWK, the post-quantum signature scheme by Léo Ducas, Eamonn W. Postlethwaite, Ludo N. Pulles, and Wessel van Woerden. HAWK is the only lattice-based scheme still standing in NIST's Additional Digital Signatures process — advanced to Round 2 by NIST IR 8528 (October 2024) and to Round 3 by NIST IR 8610 (2026). This repo focuses on the structural reasons HAWK is interesting in 2026: integer-only arithmetic, discrete Gaussian sampling over Z through fixed lookup tables, no accept/reject loop inside the sampler, and a cleaner constant-time story than Falcon.
+Browser-based educational demo of HAWK, the post-quantum signature scheme by Léo Ducas, Eamonn W. Postlethwaite, Ludo N. Pulles, and Wessel van Woerden. HAWK was the last lattice-based scheme standing in NIST's Additional Digital Signatures process — advanced to Round 2 by NIST IR 8528 (October 2024) and to Round 3 by NIST IR 8610 (2026) — until its designers **withdrew it on 29 July 2026**, one day after a key-recovery attack halved its security margin. This repo covers the structural reasons HAWK was interesting: integer-only arithmetic, discrete Gaussian sampling over Z through fixed lookup tables, no accept/reject loop inside the sampler, and a cleaner constant-time story than Falcon — and then why none of that saved it.
 
-> **July 2026: HAWK's claimed security was cut roughly in half.** Straznickas and Weis published an unconditional reduction from HAWK-*n* key recovery to SVP in dimension *n*/2 + 1, dropping HAWK-512 from 2¹⁵⁰ to ≤2¹⁰⁸ gates and recovering real HAWK-256 keys end to end. This changes what the lab teaches, not whether it is worth teaching — see [Security status](#security-status-the-july-2026-key-recovery-attack) below. Nothing deployed is affected; Falcon and ML-DSA are untouched.
+> **HAWK is withdrawn.** On 28 July 2026 Straznickas and Weis published an unconditional reduction from HAWK-*n* key recovery to SVP in dimension *n*/2 + 1, dropping HAWK-512 from 2¹⁵⁰ to ≤2¹⁰⁸ gates and recovering real HAWK-256 keys end to end. On 29 July the HAWK team withdrew the scheme on the NIST pqc-forum, judging that doubling parameters or moving to higher-rank modules would leave it uncompetitive. NIST lists it as withdrawn. See [Security status](#security-status-the-july-2026-key-recovery-attack) below — and note the lab now *runs* that attack. Nothing deployed is affected; Falcon and ML-DSA are untouched.
 
 This is a Vite + TypeScript + vanilla CSS educational lab that compares Falcon, ML-DSA, and HAWK side by side. The demo implements HAWK-512 and HAWK-1024 at educational fidelity around the HAWK v1.1 specification dated February 5, 2025. It is intentionally not a production implementation and does not claim byte-exact compatibility with the official reference code.
 
@@ -22,7 +22,7 @@ The UI opens with a five-step guided learning path and then walks through six ex
 - What module-LIP means, shown as a short basis versus a bad basis over the *same* lattice: both bases are unimodular recombinations (determinant 4) that render the identical dot grid, and a draggable hash target animates greedy Babai rounding as basis-step arrows from the origin, counting the steps on screen so the short-basis-is-easy / bad-basis-is-hard claim is something you discover by dragging rather than read — followed by a cryptanalysis panel carrying the July 2026 result, because that exhibit is exactly where the assumption moved — including a live runner that executes the key-recovery reduction at toy parameters and recovers a working basis from the public key alone
 - The Gaussian sampling difference between Falcon and HAWK, with a step-through of a single CDT draw (pre-seeded with a worked example on load) that accumulates into a live tally, plus a synchronized bell-curve panel that marks where the random word lands on the discrete Gaussian and shades the tail regions the crossed thresholds correspond to, making "how many thresholds it falls under = magnitude" visually obvious
 - A live HAWK signing walkthrough that shows the verification identity in the open: recompute the message's parity target, check the signature's lattice coset against it with the public parity basis, and check the lattice point's Euclidean length via the public Gram matrix Q = B*B, with the actual numbers — plus a public-key-only forgery you can run, and a sampler-gap bench that measures whether swapping in a real discrete-Gaussian coset sampler would have stopped it (it does not, and the bench shows exactly which property is the reason)
-- A standardization roadmap through Round 3 and the July 2026 attack, plus deployment guidance for real 2026 systems
+- A standardization roadmap from the 2022 on-ramp through the July 2026 attack and withdrawal, plus deployment guidance for real 2026 systems
 - A glossary of every key term plus a six-question self-check that grades entirely in the browser
 
 A self-test runs on page load — a real keygen → sign → verify → tamper-reject round-trip, plus a public-key-only forgery that this build is expected to accept — so the honesty claims are machine-checked in both directions, not just asserted. The result shows as a badge in the header.
@@ -58,7 +58,9 @@ What stays simplified elsewhere: a mod-2 coset solve instead of the full discret
 
 ## Security status: the July 2026 key-recovery attack
 
-In July 2026, Zygimantas Straznickas and Stephen A. Weis (Anthropic) published *HAWK-n Key Recovery Reduces to SVP in Dimension n/2 + 1*: an unconditional, deterministic polynomial-time reduction from HAWK key recovery to polynomially many exact-SVP calls in **half** the dimension HAWK's parameters were sized against.
+HAWK is withdrawn as of 29 July 2026. Here is what ended it.
+
+On 28 July 2026, Zygimantas Straznickas and Stephen A. Weis (Anthropic) published *HAWK-n Key Recovery Reduces to SVP in Dimension n/2 + 1*: an unconditional, deterministic polynomial-time reduction from HAWK key recovery to polynomially many exact-SVP calls in **half** the dimension HAWK's parameters were sized against.
 
 **What the attack uses.** HAWK's public key is the Gram matrix Q = B\*B of a secret short basis B over the power-of-two cyclotomic field Q(ζ). That field has three order-2 Galois involutions; every prior module-LIP attack worked only with complex conjugation. The new attack uses a second one, τ: ζ ↦ −ζ, and shows that Q *by itself* cuts out a publicly computable lattice of rank n whose shortest vector is the τ-cocycle V = B⁻¹τ(B). That lattice is near-hypercubic — isometric up to scale to Z^(n/2+1) ⊕ √2·Z^(n/2−1) — so Ducas's block reduction returns V with SVP-oracle calls in dimension n/2 + 1, and the van Gent–Pulles descent turns V back into a basis that signs.
 
@@ -74,13 +76,15 @@ The theoretical possibility was already known: prior work proved that an efficie
 
 The authors implemented the attack and recovered the secret keys of two HAWK-256 public keys generated by the reference key generator, end to end, in a few hours on a single 96-core server — verified against the HAWK reference implementation. HAWK-512 has not been attempted.
 
-**What it does not touch.** Falcon is unaffected; the construction does not transfer. Nothing in production is at risk, because HAWK ships in no standard and no product. The attack needs a Galois involution other than complex conjugation, which exists exactly when (Z/m)× is non-cyclic — so conductors m ∈ {p^k, 2p^k} for an odd prime p evade it. That makes this a result about HAWK's current choice of ring, not about lattice signatures or module-LIP in general. Roughly doubling HAWK's parameters would restore a comparable margin, at the cost of the compactness that was HAWK's main selling point.
+**What happened next.** On 29 July 2026, one day after publication, the HAWK team withdrew the scheme from the NIST process on the pqc-forum. They confirmed the attack "approximately halves the block size required in lattice reduction to recover an equivalent secret key," and concluded that the straightforward mitigations — doubling the parameters or moving to higher-rank modules — "make HAWK uncompetitive." NIST updated its third-round candidate page to mark HAWK withdrawn. Four years of expert review, and the scheme was retired a day after the attack landed.
+
+**What it does not touch.** Falcon is unaffected; the construction does not transfer. Nothing in production was ever at risk, because HAWK shipped in no standard and no product. The attack needs a Galois involution other than complex conjugation, which exists exactly when (Z/m)× is non-cyclic — so conductors m ∈ {p^k, 2p^k} for an odd prime p evade it. That makes this a result about HAWK's choice of ring, not about lattice signatures or module-LIP in general.
 
 **Provenance.** The mathematics was found by Claude Mythos Preview working semi-autonomously inside a multi-agent scaffold built on Claude Code, with access to Python, Sage, and a library of published cryptography — roughly 60 hours of model work and about $100,000 in API cost, directed by one non-specialist researcher. Anthropic disclosed to the HAWK designers in June 2026 and published in coordination with the NIST PQC forum in July; Thomas Pornin and the HAWK team reviewed the work. The paper's own acknowledgements state that the majority of its mathematical discoveries were AI-assisted, with the human authors directing, organizing, and verifying.
 
 **A companion result, same program.** The same effort produced *Cryptanalysis of 7-Round AES via the Algebraic Structure of its S-box* (Milad Nasr and Nicholas Carlini), which introduces an algebraic **Möbius bridge** exploiting the invert-then-affine structure of the AES S-box to eliminate one of the nine key bytes guessed by Derbez–Fouque–Jean, cutting the attack on 7-round AES from 2⁹⁹ to between 2⁸⁹·³ and 2⁹¹·⁴ time at the same 2¹⁰⁵ chosen-plaintext data complexity. Full 10-round AES as deployed is untouched and the attack is completely impractical. It is unrelated to HAWK and is noted here only because it is the other half of the same disclosure.
 
-**What this repo did about it.** Every status claim in the app and this README moved from Round 2 to Round 3, Exhibit 1.5 gained a cryptanalysis panel carrying the result and the numbers above, the roadmap gained the disclosure timeline, the glossary gained a Galois-automorphism entry, and the self-check gained a question on the attack.
+**What this repo did about it.** Every status claim in the app and this README now reads *withdrawn* rather than Round 2 or Round 3, Exhibit 1.5 gained a cryptanalysis panel carrying the result and the numbers above, the roadmap ends at the withdrawal, the glossary gained a Galois-automorphism entry, and the self-check gained a question on the attack.
 
 ### The attack runs live, at toy parameters
 
@@ -102,24 +106,24 @@ This is a separate module (`src/lip-attack.ts`) from the HAWK-512/1024 teaching 
 
 Use this repo when you want to:
 
-- Understand the research frontier of lattice signatures as of 2026
+- Understand how the lattice-signature frontier looked in 2026, and how fast it moved
 - Explain why Falcon's floating-point Gaussian sampler remains a deployment liability
 - Compare HAWK's smLIP-based design against ML-DSA and Falcon
 - Show students how discrete Gaussian sampling over Z differs from Falcon's lattice-centered sampling
-- Illustrate why HAWK is attractive for constrained devices, FHE, and MPC-oriented discussions
+- Illustrate why HAWK was attractive for constrained devices, FHE, and MPC-oriented discussions — and why that was not enough
 - Teach how a scheme's security assumption can move underneath a well-engineered implementation, using the July 2026 automorphism attack as the worked example — and let students run that attack themselves at a size that finishes instantly
-- Keep an eye on possible 2027+ post-standardization adoption paths
+- Study a complete arc: proposal, four years of expert review, an AI-found structural attack, and withdrawal in a day
 - Do NOT use this repo for production signatures — if you need production-ready PQ signatures now, use ML-DSA per FIPS 204 and deploy with crypto agility.
 
 ## Live Demo
 
 **[systemslibrarian.github.io/crypto-lab-hawk](https://systemslibrarian.github.io/crypto-lab-hawk/)**
 
-The lab opens with a five-step guided path, then six exhibits: the three lattice signatures at a glance, a module-LIP short-basis vs bad-basis view, a step-through of HAWK's integer-only discrete Gaussian sampling against Falcon's, a live HAWK-512/1024 signing walkthrough that exposes the verification identity and norm bound with real numbers, a standardization roadmap through Round 3 and the July 2026 attack, and a glossary plus self-check. A keygen → sign → verify → tamper-reject self-test runs on page load and reports as a header badge.
+The lab opens with a five-step guided path, then six exhibits: the three lattice signatures at a glance, a module-LIP short-basis vs bad-basis view, a step-through of HAWK's integer-only discrete Gaussian sampling against Falcon's, a live HAWK-512/1024 signing walkthrough that exposes the verification identity and norm bound with real numbers, a standardization roadmap ending in the July 2026 withdrawal, and a glossary plus self-check. A keygen → sign → verify → tamper-reject self-test runs on page load and reports as a header badge.
 
 ## What Can Go Wrong
 
-- HAWK is still a Round 3 candidate, not a standard. NIST may not select it, and the July 2026 key-recovery attack makes that materially more likely than it looked a year ago.
+- HAWK is withdrawn. It is not a standard and will not become one on its current design. Nothing here is a deployment path; it is a case study.
 - HAWK's published parameter sets no longer deliver the security they claim. HAWK-512 drops from 2¹⁵⁰ to ≤2¹⁰⁸ gates. Treat every parameter and size figure in this lab as describing HAWK v1.1 as specified, not as a current security estimate.
 - This code is educational, not byte-exact reference code. The parameter handling and verification structure are simplified to make the design legible in a browser demo.
 - Cryptanalysis is ongoing and just proved the point. Security estimates, implementation guidance, and even parameter choices may still change again — the open question the attack's authors leave is whether the same rank-4 module structure admits a solver below dimension n/2.
@@ -129,7 +133,7 @@ The lab opens with a five-step guided path, then six exhibits: the three lattice
 
 ## Real-World Usage
 
-HAWK was introduced in Ducas, Postlethwaite, Pulles, and van Woerden, "Hawk: Module LIP makes Lattice Signatures Fast, Compact and Simple" at ASIACRYPT 2022. The current public specification for this repo's framing is HAWK v1.1 dated February 5, 2025. NIST IR 8528 documented the first-round additional-signatures report in October 2024 and advanced HAWK to Round 2; NIST IR 8610 reported on Round 2 in 2026 and advanced HAWK to Round 3, again as the only lattice-based candidate in the field — while specifically asking for further analysis of smLIP within the structure of cyclotomic number fields, which is precisely where the July 2026 attack landed.
+HAWK was introduced in Ducas, Postlethwaite, Pulles, and van Woerden, "Hawk: Module LIP makes Lattice Signatures Fast, Compact and Simple" at ASIACRYPT 2022. The current public specification for this repo's framing is HAWK v1.1 dated February 5, 2025. NIST IR 8528 documented the first-round additional-signatures report in October 2024 and advanced HAWK to Round 2; NIST IR 8610 reported on Round 2 in 2026 and advanced HAWK to Round 3, again as the only lattice-based candidate in the field — while specifically asking for further analysis of smLIP within the structure of cyclotomic number fields. That is precisely where the July 2026 attack landed, and on 29 July 2026 the HAWK team withdrew the scheme on the NIST pqc-forum.
 
 As of August 2026, the most practical deployment guidance is:
 
@@ -169,6 +173,7 @@ npm run dev
 - Straznickas and Weis, *HAWK-n Key Recovery Reduces to SVP in Dimension n/2 + 1*, Anthropic, July 2026 — [paper](https://www.anthropic.com/document/hawk_key_recovery.pdf)
 - Nasr and Carlini, *Cryptanalysis of 7-Round AES via the Algebraic Structure of its S-box*, Anthropic, July 2026 — [paper](https://www.anthropic.com/document/aes_mobius_bridge.pdf) · [chain of thought](https://www.anthropic.com/document/aes_mobius_bridge_cot.pdf)
 - Anthropic, [Discovering cryptographic weaknesses with Claude](https://www.anthropic.com/research/discovering-cryptographic-weaknesses)
+- The disclosure and the HAWK team's withdrawal, NIST pqc-forum, 28–29 July 2026 — [thread](https://groups.google.com/a/list.nist.gov/g/pqc-forum/c/2r2u6SbHun4)
 - Attack implementation and lemma-verification scripts: [anthropics/cryptography-research-demo](https://github.com/anthropics/cryptography-research-demo)
 - Ducas, *Provable lattice reduction of Zⁿ with blocksize n/2*, Des. Codes Cryptogr. 92(4), 2024 — the block reduction the attack runs
 - van Gent and Pulles, 2025 — the automorphism descent that recovers the key from the cocycle

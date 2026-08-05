@@ -122,12 +122,12 @@ const schemeCopy: Record<SchemeKey, { title: string; accent: string; summary: st
   hawk: {
     title: 'HAWK',
     accent: 'cyan',
-    summary: 'The research frontier: integer-only Gaussian sampling over Z, no accept/reject inside the sampler, and simpler constant-time structure — but a July 2026 key-recovery attack roughly halved its claimed security.',
+    summary: 'Integer-only Gaussian sampling over Z, no accept/reject inside the sampler, and the simplest constant-time structure of the three — withdrawn from NIST standardization in July 2026 after a key-recovery attack halved its security margin.',
     bullets: [
       'Hard problem: smLIP + omSVP',
       'No floating point anywhere in the core path',
       'No accept/reject inside the sampler; signing restarts only on the norm bound',
-      'NIST On-Ramp Round 3, still not standardized',
+      'Withdrawn from the NIST on-ramp, 29 July 2026',
       'July 2026: key recovery reduced to SVP in dimension n/2 + 1',
     ],
   },
@@ -172,7 +172,7 @@ const compareRows: CompareRow[] = [
   { dimension: 'Outer signing restart loop?', falcon: 'No', mldsa: 'Yes (≈3–5 iterations)', hawk: 'Rare (norm bound only)' },
   { dimension: 'Rejection inside the sampler?', falcon: 'Yes (SamplerZ accept/reject)', mldsa: 'Yes (that is the outer loop)', hawk: 'No (fixed table walk)' },
   { dimension: 'Constant-time posture', falcon: 'Hard to achieve', mldsa: 'Mixed', hawk: 'Designed in' },
-  { dimension: 'Standardization', falcon: 'FIPS 206 (in progress)', mldsa: 'FIPS 204 (standard)', hawk: 'Round 3 on-ramp' },
+  { dimension: 'Standardization', falcon: 'FIPS 206 (in progress)', mldsa: 'FIPS 204 (standard)', hawk: 'Withdrawn (July 2026)' },
   { dimension: 'Best 2026 key-recovery result', falcon: 'No comparable result', mldsa: 'No comparable result', hawk: 'HAWK-512: 2¹⁵⁰ → ≤2¹⁰⁸ gates' },
 ];
 
@@ -188,7 +188,7 @@ const glossary: GlossaryTerm[] = [
   { slug: 'constant-time', term: 'Constant-time', short: 'Runs in the same time regardless of secret data, defeating timing attacks.', full: 'Constant-time code takes the same amount of time and the same memory-access pattern no matter what the secret inputs are, so an attacker measuring timing learns nothing. Floating-point math and data-dependent loops make this hard, which is why HAWK’s integer-only, loop-free signing path is attractive.' },
   { slug: 'golomb-rice', term: 'Golomb-Rice', short: 'A compact code for small integers: a few low bits plus a unary tail.', full: 'Golomb-Rice coding splits each integer into low bits stored directly and high bits stored in unary. It is efficient when values are usually small, which is exactly the case for HAWK’s signature coefficients. This demo uses a real Golomb-Rice encoder to measure signature byte sizes.' },
   { slug: 'ntt', term: 'NTT', short: 'Number Theoretic Transform: a fast integer convolution, the integer cousin of the FFT.', full: 'The Number Theoretic Transform multiplies polynomials quickly using modular arithmetic instead of floating-point roots of unity. Production HAWK uses it to make signing fast; this educational build uses slower schoolbook multiplication for clarity, which is why production HAWK is much faster than the JS here.' },
-  { slug: 'fips', term: 'FIPS 204 / 206', short: 'NIST standards: 204 is ML-DSA (final); 206 will be Falcon (FN-DSA, in progress).', full: 'FIPS 204 standardized ML-DSA in 2024 and is production-ready today. FIPS 206 will standardize Falcon as FN-DSA and is still being finalized. HAWK is not in any FIPS draft — NIST IR 8610 advanced it to Round 3 of the additional-signatures on-ramp in 2026, as the only remaining lattice candidate.' },
+  { slug: 'fips', term: 'FIPS 204 / 206', short: 'NIST standards: 204 is ML-DSA (final); 206 will be Falcon (FN-DSA, in progress).', full: 'FIPS 204 standardized ML-DSA in 2024 and is production-ready today. FIPS 206 will standardize Falcon as FN-DSA and is still being finalized. HAWK is not in any FIPS draft and never will be: NIST IR 8610 advanced it to Round 3 in 2026, and its designers withdrew it on 29 July 2026 after the key-recovery attack. NIST lists it as withdrawn.' },
 ];
 
 const glossaryBySlug = new Map(glossary.map((entry) => [entry.slug, entry]));
@@ -255,7 +255,7 @@ const quizQuestions: QuizQuestion[] = [
       'None of them are standardized yet.',
     ],
     correct: 2,
-    explain: 'ML-DSA was standardized as FIPS 204 in 2024. Falcon (FIPS 206) is still in progress, and HAWK is only a Round 3 candidate.',
+    explain: 'ML-DSA was standardized as FIPS 204 in 2024. Falcon (FIPS 206) is still in progress. HAWK is out of the running entirely — its designers withdrew it in July 2026.',
   },
   {
     id: 'q-this-build',
@@ -331,7 +331,7 @@ const state: {
   message: localStorage.getItem('hawk-message') ?? 'Release firmware v2.3.1 on 2026-04-19',
   theme: (document.documentElement.getAttribute('data-theme') as 'dark' | 'light' | null) ?? 'dark',
   statusMessage: null,
-  liveMessage: 'HAWK demo loaded. Round 3 status notice: educational build only, and a July 2026 key-recovery attack halves HAWK’s claimed security — see Exhibit 1.5.',
+  liveMessage: 'HAWK demo loaded. Educational build only. HAWK was withdrawn from NIST standardization on 29 July 2026 after a key-recovery attack halved its security margin — see Exhibit 1.5.',
   pendingFocusSelector: null,
   cdt: null,
   cdtSamples: [],
@@ -343,12 +343,6 @@ const state: {
 };
 
 const schemeOrder: SchemeKey[] = ['falcon', 'mldsa', 'hawk'];
-
-function setTheme(theme: 'dark' | 'light'): void {
-  state.theme = theme;
-  document.documentElement.setAttribute('data-theme', theme);
-  localStorage.setItem('theme', theme);
-}
 
 function setLiveMessage(message: string): void {
   state.liveMessage = message;
@@ -1123,7 +1117,7 @@ function cryptanalysisMarkup(): string {
   return `
     <div class="cryptanalysis-panel" id="cryptanalysis-2026">
       <span class="eyebrow">July 2026 · cryptanalysis update</span>
-      <h3>The assumption above is weaker than HAWK's parameters assumed</h3>
+      <h3>The assumption above is weaker than HAWK's parameters assumed — and it ended the scheme</h3>
       <p>
         Everything in this exhibit still describes what HAWK <em>is</em>. What changed is how hard the
         recovery actually turns out to be. In July 2026 Zygimantas Straznickas and Stephen A. Weis
@@ -1159,13 +1153,21 @@ function cryptanalysisMarkup(): string {
       </p>
       <div class="cryptanalysis-scope">
         <div>
+          <h4>What happened next</h4>
+          <p>
+            On <strong>29 July 2026</strong>, one day after publication, the HAWK team withdrew the scheme on
+            the NIST pqc-forum. They confirmed the attack roughly halves the block size needed to recover an
+            equivalent secret key, and judged that the straightforward fixes — doubling the parameters or
+            moving to higher-rank modules — would make HAWK uncompetitive. NIST marked it withdrawn.
+          </p>
+        </div>
+        <div>
           <h4>What it does not touch</h4>
           <p>
-            Falcon is unaffected — the construction does not transfer. Nothing deployed today is at risk:
-            HAWK ships in no product and no standard. Doubling HAWK's parameters would restore a comparable
-            margin, at the cost of the compactness that made it attractive. Fields whose conductor is
-            p<sup>k</sup> or 2p<sup>k</sup> for an odd prime p evade the construction entirely, so the result
-            aims at HAWK's current choice of ring rather than at lattice signatures generally.
+            Falcon is unaffected — the construction does not transfer. Nothing deployed was ever at risk:
+            HAWK shipped in no product and no standard. Fields whose conductor is p<sup>k</sup> or
+            2p<sup>k</sup> for an odd prime p evade the construction entirely, so the result aims at HAWK's
+            choice of ring rather than at lattice signatures generally.
           </p>
         </div>
         <div>
@@ -1724,20 +1726,29 @@ function render(): void {
       <header class="cl-hero">
         <div class="cl-hero-main">
           <h1 class="cl-hero-title" id="hero-title">HAWK</h1>
-          <p class="cl-hero-sub">Integer-only lattice signatures · module-LIP · NIST PQ Round 3</p>
+          <p class="cl-hero-sub">Integer-only lattice signatures · module-LIP · withdrawn from NIST PQ, July 2026</p>
           <p class="cl-hero-desc">Sign and verify with HAWK in the browser while you watch its discrete Gaussian CDT sampler walk, the short-vs-bad basis behind module-LIP, and a live speed comparison against Falcon and ML-DSA.</p>
         </div>
-        <aside class="cl-hero-why" aria-label="Why it matters">
-          <span class="cl-hero-why-label">WHY IT MATTERS</span>
-          <p class="cl-hero-why-text">Signing secret keys leaks through timing and float rounding, and Falcon and ML-DSA both fight that. HAWK's integer-only, no-rejection-loop design gives it a cleaner constant-time story. A July 2026 attack then halved its claimed key strength — which makes it the clearest live example of the other half of the job: an implementation can be beautiful and the assumption underneath it can still move.</p>
-        </aside>
+        <div class="cl-hero-side">
+          <aside class="cl-hero-withdrawn" role="note" aria-label="Standardization status">
+            <span class="withdrawn-flag">WITHDRAWN</span>
+            <p>
+              The HAWK team withdrew HAWK from NIST's post-quantum signature process on
+              <strong>29 July 2026</strong>, one day after a key-recovery attack halved its security margin.
+              NIST lists it as withdrawn. <a href="#cryptanalysis-2026">What happened →</a>
+            </p>
+          </aside>
+          <aside class="cl-hero-why" aria-label="Why it matters">
+            <span class="cl-hero-why-label">WHY IT MATTERS</span>
+            <p class="cl-hero-why-text">This lab now teaches a scheme that lost. HAWK's integer-only, no-rejection-loop signing is still the cleanest constant-time story in lattice signatures — and it was withdrawn anyway, because the hardness assumption underneath it moved. That gap is the lesson: an implementation can be beautiful and the mathematics under it can still give way.</p>
+          </aside>
+        </div>
       </header>
       <div class="hero-meta">
         <div class="hero-actions">
-          <button class="pill-button" type="button" data-action="theme-toggle" aria-pressed="${state.theme === 'light'}" aria-label="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode">Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode</button>
-          <span class="status-badge round-status">Round 3, not standardized</span>
+          <span class="status-badge round-status">Withdrawn from NIST PQC, July 2026</span>
           <span class="status-badge caution">Educational build only</span>
-          <a class="status-badge cryptanalysis" href="#cryptanalysis-2026">July 2026: security claim halved</a>
+          <a class="status-badge cryptanalysis" href="#cryptanalysis-2026">Why it was withdrawn</a>
           ${selfTestBadgeMarkup()}
         </div>
         <div class="hero-live" aria-live="polite" aria-label="Live stats from this session">
@@ -1881,7 +1892,7 @@ no transcendental functions anywhere</pre>
         <div class="section-heading">
           <span class="eyebrow">Exhibit 4</span>
           <h2 id="exhibit-four-title">Standardization Roadmap</h2>
-          <p>HAWK is still speculative. The point of this lab is to understand the design frontier, not to imply deployment approval.</p>
+          <p>Four years from proposal to withdrawal. The point of this lab is to understand the design and why it did not survive, not to imply deployment approval.</p>
         </div>
         <div class="timeline">
           <article>
@@ -1901,12 +1912,12 @@ no transcendental functions anywhere</pre>
             <p>NIST IR 8610 reports on Round 2 and advances HAWK to Round 3 — again the only lattice candidate — while asking for more analysis of smLIP over cyclotomic fields.</p>
           </article>
           <article class="timeline-alert">
-            <span>June–July 2026</span>
+            <span>28 July 2026</span>
             <p>Straznickas and Weis reduce HAWK-<em>n</em> key recovery to SVP in dimension n/2 + 1, cutting HAWK-512 from 2¹⁵⁰ to ≤2¹⁰⁸ gates. Disclosed to the designers in June, published in July. <a href="#cryptanalysis-2026">See Exhibit 1.5</a>.</p>
           </article>
-          <article>
-            <span>Now</span>
-            <p>Round 3 evaluation continues with the attack on the table. HAWK's designers, NIST, and the community have yet to settle whether larger parameters, a different ring, or withdrawal is the answer.</p>
+          <article class="timeline-alert">
+            <span>29 July 2026</span>
+            <p>One day later, the HAWK team withdraws the scheme on the NIST pqc-forum: doubling parameters or moving to higher-rank modules would, in their words, make HAWK uncompetitive. NIST marks it withdrawn.</p>
           </article>
         </div>
       </section>
@@ -1924,11 +1935,11 @@ no transcendental functions anywhere</pre>
           </article>
           <article class="advice-card accent-cyan">
             <h3>If you care about constrained devices</h3>
-            <p>Track HAWK, but the July 2026 attack pushed the timeline out. Restoring the security margin means roughly doubling parameters, which spends the compactness that made HAWK attractive on small devices in the first place.</p>
+            <p>Stop tracking HAWK as a candidate — it is withdrawn. Its designers judged that restoring the margin, by doubling parameters or moving to higher-rank modules, would leave it uncompetitive. Falcon remains the compact option, with all its floating-point caveats intact.</p>
           </article>
           <article class="advice-card accent-purple">
             <h3>If you care about FHE or MPC</h3>
-            <p>HAWK's integer-only structure is still a serious research advantage, even if NIST ultimately picks something else — and the attack targets its choice of ring, not integer-only signing.</p>
+            <p>HAWK's integer-only structure is still worth studying, and the attack does not condemn it: what fell was the choice of power-of-two cyclotomic ring, not integer-only signing. Conductors p^k and 2p^k evade the construction entirely.</p>
           </article>
         </div>
         <h3 class="cross-links-heading">Related crypto-lab notebooks</h3>
@@ -2411,14 +2422,6 @@ function bindEvents(): void {
     button.addEventListener('click', () => {
       setParamSet(button.dataset.param as ParamKey);
     });
-  });
-
-  const themeToggle = document.querySelector<HTMLButtonElement>('[data-action="theme-toggle"]');
-  themeToggle?.addEventListener('click', () => {
-    setTheme(state.theme === 'dark' ? 'light' : 'dark');
-    setLiveMessage(`Theme switched to ${state.theme} mode.`);
-    setPendingFocus('[data-action="theme-toggle"]');
-    render();
   });
 
   const messageInput = document.querySelector<HTMLTextAreaElement>('[data-role="message-input"]');
