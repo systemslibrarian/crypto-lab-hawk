@@ -27,6 +27,7 @@ import {
 } from './hawk';
 import { HAWK_512_PARAMS, HAWK_1024_PARAMS } from './polynomial';
 import { runSamplerGap, type SamplerGapReport } from './sampler-gap';
+import { runLipAttack, TOY_DEGREES, type AttackRun, type ToyDegree } from './lip-attack';
 
 type SchemeKey = 'falcon' | 'mldsa' | 'hawk';
 type ParamKey = '512' | '1024';
@@ -121,12 +122,13 @@ const schemeCopy: Record<SchemeKey, { title: string; accent: string; summary: st
   hawk: {
     title: 'HAWK',
     accent: 'cyan',
-    summary: 'The research frontier: integer-only Gaussian sampling over Z, no accept/reject inside the sampler, and simpler constant-time structure.',
+    summary: 'The research frontier: integer-only Gaussian sampling over Z, no accept/reject inside the sampler, and simpler constant-time structure — but a July 2026 key-recovery attack roughly halved its claimed security.',
     bullets: [
       'Hard problem: smLIP + omSVP',
       'No floating point anywhere in the core path',
       'No accept/reject inside the sampler; signing restarts only on the norm bound',
-      'NIST On-Ramp Round 2, still not standardized',
+      'NIST On-Ramp Round 3, still not standardized',
+      'July 2026: key recovery reduced to SVP in dimension n/2 + 1',
     ],
   },
 };
@@ -156,7 +158,7 @@ const learningPath: LearningStep[] = [
   { href: '#exhibit-lip', index: '02', title: 'See the hard problem', blurb: 'Why a short basis is secret and a long one is public.' },
   { href: '#exhibit-gaussian', index: '03', title: 'Watch the sampler', blurb: 'Integer table walk versus floating-point rejection.' },
   { href: '#exhibit-signing', index: '04', title: 'Sign and verify', blurb: 'A full round-trip with the identity shown in the open.' },
-  { href: '#glossary', index: '05', title: 'Check your understanding', blurb: 'Glossary of terms, then a five-question self-check.' },
+  { href: '#glossary', index: '05', title: 'Check your understanding', blurb: 'Glossary of terms, then a six-question self-check.' },
 ];
 
 type CompareRow = { dimension: string; falcon: string; mldsa: string; hawk: string };
@@ -170,12 +172,14 @@ const compareRows: CompareRow[] = [
   { dimension: 'Outer signing restart loop?', falcon: 'No', mldsa: 'Yes (≈3–5 iterations)', hawk: 'Rare (norm bound only)' },
   { dimension: 'Rejection inside the sampler?', falcon: 'Yes (SamplerZ accept/reject)', mldsa: 'Yes (that is the outer loop)', hawk: 'No (fixed table walk)' },
   { dimension: 'Constant-time posture', falcon: 'Hard to achieve', mldsa: 'Mixed', hawk: 'Designed in' },
-  { dimension: 'Standardization', falcon: 'FIPS 206 (in progress)', mldsa: 'FIPS 204 (standard)', hawk: 'Round 2 on-ramp' },
+  { dimension: 'Standardization', falcon: 'FIPS 206 (in progress)', mldsa: 'FIPS 204 (standard)', hawk: 'Round 3 on-ramp' },
+  { dimension: 'Best 2026 key-recovery result', falcon: 'No comparable result', mldsa: 'No comparable result', hawk: 'HAWK-512: 2¹⁵⁰ → ≤2¹⁰⁸ gates' },
 ];
 
 const glossary: GlossaryTerm[] = [
   { slug: 'lattice', term: 'Lattice', short: 'A regular grid of points spanned by integer combinations of basis vectors.', full: 'A lattice is the set of all integer combinations of a set of basis vectors. The same lattice can be described by many different bases — some short and almost-orthogonal, some long and skewed. Lattice cryptography hides secrets in the gap between an easy (short) basis and a hard (long) one.' },
-  { slug: 'module-lip', term: 'module-LIP', short: 'Lattice Isomorphism Problem over a module: recover a short basis from a long one.', full: 'The Lattice Isomorphism Problem asks: given two bases of the same lattice, find the transformation between them — in practice, recover a short basis from a long one. HAWK works over a module (a structured, ring-based lattice), so its assumption is "module-LIP." This is what makes HAWK signatures unforgeable without the secret short basis.' },
+  { slug: 'module-lip', term: 'module-LIP', short: 'Lattice Isomorphism Problem over a module: recover a short basis from a long one.', full: 'The Lattice Isomorphism Problem asks: given two bases of the same lattice, find the transformation between them — in practice, recover a short basis from a long one. HAWK works over a module (a structured, ring-based lattice), so its assumption is "module-LIP." This is what makes HAWK signatures unforgeable without the secret short basis. In July 2026 Straznickas and Weis showed that HAWK’s particular module-LIP instance is easier than the designers budgeted for — see Galois automorphism.' },
+  { slug: 'automorphism', term: 'Galois automorphism (τ)', short: 'A symmetry of the number field that HAWK’s public key turns out to expose — the basis of the 2026 attack.', full: 'HAWK works over the cyclotomic field Q(ζ) for a power-of-two root of unity ζ. That field has symmetries (Galois automorphisms) that permute its elements while preserving arithmetic. Every prior module-LIP attack used only one of them, complex conjugation. Straznickas and Weis used a second, τ: ζ ↦ −ζ, and showed that the public Gram matrix Q alone pins down the τ-cocycle V = B⁻¹τ(B) as the shortest vector of a publicly computable lattice of rank n. That lattice is near-hypercubic, so a known reduction finds V with shortest-vector calls in dimension n/2 + 1 instead of the full-rank search HAWK’s parameters were sized against — halving the attack dimension and, with it, roughly halving the effective key strength.' },
   { slug: 'omsvp', term: 'omSVP', short: 'One-more Short Vector Problem — HAWK’s second supporting assumption.', full: 'The one-more Short Vector Problem (omSVP) is the assumption that, even after seeing many HAWK signatures, an attacker cannot produce one more short lattice vector of the kind a valid signature reveals. It backs HAWK’s unforgeability alongside module-LIP.' },
   { slug: 'ntru', term: 'NTRU', short: 'A ring-based lattice family; Falcon’s keys solve an NTRU equation.', full: 'NTRU is a family of lattice problems built over polynomial rings. Falcon’s key generation must solve the NTRU equation f·G − g·F = q, which can fail for a sampled basis and force a retry. HAWK reuses NTRU-style structure but leans on the Lattice Isomorphism Problem for its security.' },
   { slug: 'discrete-gaussian', term: 'Discrete Gaussian', short: 'A bell-curve distribution sampled over the integers instead of the reals.', full: 'A discrete Gaussian assigns each integer k a probability proportional to exp(−k² / 2σ²). Lattice signatures need samples from this distribution so the signature leaks nothing about the secret basis. HAWK samples it over Z with fixed integer tables; Falcon samples a Gaussian over a lattice using floating-point math.' },
@@ -184,7 +188,7 @@ const glossary: GlossaryTerm[] = [
   { slug: 'constant-time', term: 'Constant-time', short: 'Runs in the same time regardless of secret data, defeating timing attacks.', full: 'Constant-time code takes the same amount of time and the same memory-access pattern no matter what the secret inputs are, so an attacker measuring timing learns nothing. Floating-point math and data-dependent loops make this hard, which is why HAWK’s integer-only, loop-free signing path is attractive.' },
   { slug: 'golomb-rice', term: 'Golomb-Rice', short: 'A compact code for small integers: a few low bits plus a unary tail.', full: 'Golomb-Rice coding splits each integer into low bits stored directly and high bits stored in unary. It is efficient when values are usually small, which is exactly the case for HAWK’s signature coefficients. This demo uses a real Golomb-Rice encoder to measure signature byte sizes.' },
   { slug: 'ntt', term: 'NTT', short: 'Number Theoretic Transform: a fast integer convolution, the integer cousin of the FFT.', full: 'The Number Theoretic Transform multiplies polynomials quickly using modular arithmetic instead of floating-point roots of unity. Production HAWK uses it to make signing fast; this educational build uses slower schoolbook multiplication for clarity, which is why production HAWK is much faster than the JS here.' },
-  { slug: 'fips', term: 'FIPS 204 / 206', short: 'NIST standards: 204 is ML-DSA (final); 206 will be Falcon (FN-DSA, in progress).', full: 'FIPS 204 standardized ML-DSA in 2024 and is production-ready today. FIPS 206 will standardize Falcon as FN-DSA and is still being finalized. HAWK is not in any FIPS draft — it is a Round 2 candidate in NIST’s additional-signatures on-ramp.' },
+  { slug: 'fips', term: 'FIPS 204 / 206', short: 'NIST standards: 204 is ML-DSA (final); 206 will be Falcon (FN-DSA, in progress).', full: 'FIPS 204 standardized ML-DSA in 2024 and is production-ready today. FIPS 206 will standardize Falcon as FN-DSA and is still being finalized. HAWK is not in any FIPS draft — NIST IR 8610 advanced it to Round 3 of the additional-signatures on-ramp in 2026, as the only remaining lattice candidate.' },
 ];
 
 const glossaryBySlug = new Map(glossary.map((entry) => [entry.slug, entry]));
@@ -226,7 +230,20 @@ const quizQuestions: QuizQuestion[] = [
       'The hardness of inverting SHA-256.',
     ],
     correct: 2,
-    explain: 'HAWK is built on module-LIP: recovering a short lattice basis from a long one. The same lattice is described by both bases; only the short one lets you sign.',
+    explain: 'HAWK is built on module-LIP: recovering a short lattice basis from a long one. The same lattice is described by both bases; only the short one lets you sign. How hard that recovery actually is moved in July 2026 — see the next question.',
+  },
+  {
+    id: 'q-automorphism',
+    prompt: 'The July 2026 key-recovery attack on HAWK works by exploiting what?',
+    options: [
+      'A timing side channel in HAWK’s CDT sampler.',
+      'A second Galois symmetry of the underlying field, τ: ζ ↦ −ζ, which the public key exposes.',
+      'A flaw in the SHAKE hash HAWK uses for its message target.',
+      'A quantum algorithm that solves lattice problems in polynomial time.',
+    ],
+    correct: 1,
+    explain:
+      'Straznickas and Weis showed the public Gram matrix Q alone determines a rank-n lattice whose shortest vector is the τ-cocycle B⁻¹τ(B). That lattice is near-hypercubic, so a known reduction recovers it with shortest-vector calls in dimension n/2 + 1 — half the dimension HAWK’s parameters were sized against. No side channel, no hash break, no quantum computer: the assumption itself was weaker than believed.',
   },
   {
     id: 'q-standard',
@@ -238,7 +255,7 @@ const quizQuestions: QuizQuestion[] = [
       'None of them are standardized yet.',
     ],
     correct: 2,
-    explain: 'ML-DSA was standardized as FIPS 204 in 2024. Falcon (FIPS 206) is still in progress, and HAWK is only a Round 2 candidate.',
+    explain: 'ML-DSA was standardized as FIPS 204 in 2024. Falcon (FIPS 206) is still in progress, and HAWK is only a Round 3 candidate.',
   },
   {
     id: 'q-this-build',
@@ -281,6 +298,9 @@ const state: {
   busyTamper: boolean;
   busyForge: boolean;
   busySamplerGap: boolean;
+  busyLipAttack: boolean;
+  lipAttackDegree: ToyDegree;
+  lipAttack: AttackRun | null;
   boundOverride: number | null;
   message: string;
   theme: 'dark' | 'light';
@@ -304,11 +324,14 @@ const state: {
   busyTamper: false,
   busyForge: false,
   busySamplerGap: false,
+  busyLipAttack: false,
+  lipAttackDegree: 4,
+  lipAttack: null,
   boundOverride: null,
   message: localStorage.getItem('hawk-message') ?? 'Release firmware v2.3.1 on 2026-04-19',
   theme: (document.documentElement.getAttribute('data-theme') as 'dark' | 'light' | null) ?? 'dark',
   statusMessage: null,
-  liveMessage: 'HAWK demo loaded. Round 2 status notice: educational build only.',
+  liveMessage: 'HAWK demo loaded. Round 3 status notice: educational build only, and a July 2026 key-recovery attack halves HAWK’s claimed security — see Exhibit 1.5.',
   pendingFocusSelector: null,
   cdt: null,
   cdtSamples: [],
@@ -1070,6 +1093,105 @@ function lipMarkup(): string {
   `;
 }
 
+// Gate counts from Straznickas & Weis, "HAWK-n Key Recovery Reduces to SVP in
+// Dimension n/2 + 1" (Anthropic, July 2026), Table 1 and §6.1. "Spec" is the
+// HAWK v1.1 total key-recovery cost in the AGPS20 gate model; "attack" is the
+// proven upper bound the reduction gives at oracle dimension n/2 + 1. HAWK-256
+// is a challenge parameter set, so its spec figure is the paper's own
+// computation rather than a number the specification states.
+// Exponents are <sup> rather than Unicode superscript digits: at the table's
+// font size the Unicode forms render too small to read comfortably.
+const attackCosts: Array<{ set: string; specGates: string; attackGates: string; note: string }> = [
+  { set: 'HAWK-256', specGates: '2<sup>74</sup>', attackGates: '2<sup>52</sup>', note: 'challenge set — recovered end to end in practice' },
+  { set: 'HAWK-512', specGates: '2<sup>150</sup>', attackGates: '≤2<sup>108</sup>', note: 'the NIST-I parameter set' },
+  { set: 'HAWK-1024', specGates: '2<sup>288</sup>', attackGates: '≤2<sup>182</sup>', note: 'the NIST-V parameter set' },
+];
+
+function cryptanalysisMarkup(): string {
+  const rows = attackCosts
+    .map(
+      (row) => `
+        <tr>
+          <th scope="row">${row.set}</th>
+          <td class="mono-cell">${row.specGates}</td>
+          <td class="mono-cell attack-cell">${row.attackGates}</td>
+          <td>${escapeHtml(row.note)}</td>
+        </tr>`,
+    )
+    .join('');
+
+  return `
+    <div class="cryptanalysis-panel" id="cryptanalysis-2026">
+      <span class="eyebrow">July 2026 · cryptanalysis update</span>
+      <h3>The assumption above is weaker than HAWK's parameters assumed</h3>
+      <p>
+        Everything in this exhibit still describes what HAWK <em>is</em>. What changed is how hard the
+        recovery actually turns out to be. In July 2026 Zygimantas Straznickas and Stephen A. Weis
+        published an unconditional, deterministic reduction: HAWK-<em>n</em> key recovery reduces to
+        polynomially many shortest-vector calls in dimension <strong>n/2 + 1</strong>, roughly half the
+        dimension the scheme's parameters were sized against.
+      </p>
+      <p>
+        The lever is a ${termChip('automorphism', 'Galois automorphism')} nobody had used before. HAWK
+        lives over the cyclotomic field Q(ζ) for a power-of-two ζ, and every earlier module-LIP attack
+        worked with just one of that field's symmetries — complex conjugation. Straznickas and Weis used a
+        second one, τ: ζ ↦ −ζ, and showed that the public Gram matrix Q by itself cuts out a rank-<em>n</em>
+        lattice whose shortest vector is the τ-cocycle V = B⁻¹τ(B). That lattice is near-hypercubic
+        (isometric up to scale to Z<sup>n/2+1</sup> ⊕ √2 Z<sup>n/2−1</sup>), so Ducas's block reduction finds
+        V with shortest-vector calls in dimension n/2 + 1, and the van Gent–Pulles descent turns V back into
+        a basis that signs. Prior work had proved such an automorphism <em>would</em> break the scheme; what
+        was missing was a demonstration that HAWK's own lattice contains one. It does.
+      </p>
+      <div class="table-scroll">
+        <table class="cryptanalysis-table">
+          <caption>Key-recovery cost in the AGPS20 gate model, HAWK v1.1 spec versus the 2026 reduction.</caption>
+          <thead>
+            <tr><th scope="col">Parameter set</th><th scope="col">Spec claim</th><th scope="col">After the attack</th><th scope="col">Notes</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p>
+        These are the <em>proven</em> bounds. Under the HAWK specification's own heuristic methodology the
+        authors put key recovery nearer 2⁸⁰·⁸ for HAWK-512 and 2¹⁴⁶·⁵ for HAWK-1024. They also implemented
+        the attack and recovered real HAWK-256 secret keys end to end in a few hours on one 96-core server,
+        verified against the HAWK reference implementation.
+      </p>
+      <div class="cryptanalysis-scope">
+        <div>
+          <h4>What it does not touch</h4>
+          <p>
+            Falcon is unaffected — the construction does not transfer. Nothing deployed today is at risk:
+            HAWK ships in no product and no standard. Doubling HAWK's parameters would restore a comparable
+            margin, at the cost of the compactness that made it attractive. Fields whose conductor is
+            p<sup>k</sup> or 2p<sup>k</sup> for an odd prime p evade the construction entirely, so the result
+            aims at HAWK's current choice of ring rather than at lattice signatures generally.
+          </p>
+        </div>
+        <div>
+          <h4>How it was found</h4>
+          <p>
+            By Claude Mythos Preview, working semi-autonomously in a multi-agent scaffold with Python, Sage
+            and a library of published cryptography — roughly 60 hours and about $100,000 of API spend, with
+            a non-specialist researcher steering. Anthropic disclosed to the HAWK designers in June 2026 and
+            published in coordination with the NIST PQC forum. Thomas Pornin and the HAWK team reviewed the
+            work.
+          </p>
+        </div>
+      </div>
+      ${lipAttackMarkup()}
+      <p class="mini-note">
+        The runner above is this lab's own implementation of the reduction at toy size; it does not affect the
+        signing walkthrough below, whose keys are not unimodular and so have no cocycle to recover (see the
+        honesty panel in Exhibit 3). The authors' own attack code, which reaches HAWK-256, is released at
+        <a href="https://github.com/anthropics/cryptography-research-demo" rel="noopener" target="_blank">anthropics/cryptography-research-demo</a>;
+        the paper is
+        <a href="https://www.anthropic.com/document/hawk_key_recovery.pdf" rel="noopener" target="_blank">HAWK-n Key Recovery Reduces to SVP in Dimension n/2 + 1</a>.
+      </p>
+    </div>
+  `;
+}
+
 function downloadMarkup(): string {
   if (!state.signing) {
     return '';
@@ -1602,19 +1724,20 @@ function render(): void {
       <header class="cl-hero">
         <div class="cl-hero-main">
           <h1 class="cl-hero-title" id="hero-title">HAWK</h1>
-          <p class="cl-hero-sub">Integer-only lattice signatures · module-LIP · NIST PQ Round 2</p>
+          <p class="cl-hero-sub">Integer-only lattice signatures · module-LIP · NIST PQ Round 3</p>
           <p class="cl-hero-desc">Sign and verify with HAWK in the browser while you watch its discrete Gaussian CDT sampler walk, the short-vs-bad basis behind module-LIP, and a live speed comparison against Falcon and ML-DSA.</p>
         </div>
         <aside class="cl-hero-why" aria-label="Why it matters">
           <span class="cl-hero-why-label">WHY IT MATTERS</span>
-          <p class="cl-hero-why-text">Signing secret keys leaks through timing and float rounding, and Falcon and ML-DSA both fight that. HAWK's integer-only, no-rejection-loop design gives it a cleaner constant-time story, so understanding it previews where post-quantum signatures are heading.</p>
+          <p class="cl-hero-why-text">Signing secret keys leaks through timing and float rounding, and Falcon and ML-DSA both fight that. HAWK's integer-only, no-rejection-loop design gives it a cleaner constant-time story. A July 2026 attack then halved its claimed key strength — which makes it the clearest live example of the other half of the job: an implementation can be beautiful and the assumption underneath it can still move.</p>
         </aside>
       </header>
       <div class="hero-meta">
         <div class="hero-actions">
           <button class="pill-button" type="button" data-action="theme-toggle" aria-pressed="${state.theme === 'light'}" aria-label="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode">Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode</button>
-          <span class="status-badge round-2">Round 2, not standardized</span>
+          <span class="status-badge round-status">Round 3, not standardized</span>
           <span class="status-badge caution">Educational build only</span>
+          <a class="status-badge cryptanalysis" href="#cryptanalysis-2026">July 2026: security claim halved</a>
           ${selfTestBadgeMarkup()}
         </div>
         <div class="hero-live" aria-live="polite" aria-label="Live stats from this session">
@@ -1686,6 +1809,7 @@ function render(): void {
           <p>HAWK's hardness assumption is the ${termChip('module-lip', 'Lattice Isomorphism Problem')}: given two bases of the same ${termChip('lattice')}, find a short one from a long one. The two views below span <em>the same lattice</em>; only the basis differs.</p>
         </div>
         ${lipMarkup()}
+        ${cryptanalysisMarkup()}
       </section>
 
       <section class="exhibit" id="exhibit-gaussian" aria-labelledby="exhibit-two-title" aria-busy="${state.busyGaussian}">
@@ -1773,8 +1897,16 @@ no transcendental functions anywhere</pre>
             <p>HAWK v1.1 lands with the current public specification used by this demo.</p>
           </article>
           <article>
-            <span>April 2026</span>
-            <p>Round 2 evaluation is still underway. Down-select and final standardization remain uncertain.</p>
+            <span>2026</span>
+            <p>NIST IR 8610 reports on Round 2 and advances HAWK to Round 3 — again the only lattice candidate — while asking for more analysis of smLIP over cyclotomic fields.</p>
+          </article>
+          <article class="timeline-alert">
+            <span>June–July 2026</span>
+            <p>Straznickas and Weis reduce HAWK-<em>n</em> key recovery to SVP in dimension n/2 + 1, cutting HAWK-512 from 2¹⁵⁰ to ≤2¹⁰⁸ gates. Disclosed to the designers in June, published in July. <a href="#cryptanalysis-2026">See Exhibit 1.5</a>.</p>
+          </article>
+          <article>
+            <span>Now</span>
+            <p>Round 3 evaluation continues with the attack on the table. HAWK's designers, NIST, and the community have yet to settle whether larger parameters, a different ring, or withdrawal is the answer.</p>
           </article>
         </div>
       </section>
@@ -1792,11 +1924,11 @@ no transcendental functions anywhere</pre>
           </article>
           <article class="advice-card accent-cyan">
             <h3>If you care about constrained devices</h3>
-            <p>Track HAWK closely, but do not deploy it until standardization settles and implementations mature.</p>
+            <p>Track HAWK, but the July 2026 attack pushed the timeline out. Restoring the security margin means roughly doubling parameters, which spends the compactness that made HAWK attractive on small devices in the first place.</p>
           </article>
           <article class="advice-card accent-purple">
             <h3>If you care about FHE or MPC</h3>
-            <p>HAWK's integer-only structure is a serious research advantage, even if NIST ultimately picks something else.</p>
+            <p>HAWK's integer-only structure is still a serious research advantage, even if NIST ultimately picks something else — and the attack targets its choice of ring, not integer-only signing.</p>
           </article>
         </div>
         <h3 class="cross-links-heading">Related crypto-lab notebooks</h3>
@@ -1814,7 +1946,7 @@ no transcendental functions anywhere</pre>
         ${glossaryMarkup()}
 
         <div class="quiz-section" id="quiz">
-          <h3>Five-question self-check</h3>
+          <h3>Six-question self-check</h3>
           <p class="mini-note">No grading server, no tracking — this runs entirely in your browser. Pick an answer to see why it is right or wrong.</p>
           ${quizMarkup()}
         </div>
@@ -2122,6 +2254,119 @@ async function runSamplerGapDemo(): Promise<void> {
   }
 }
 
+/**
+ * Run the 2026 module-LIP key-recovery attack at toy parameters.
+ *
+ * Unlike every other control on this page, this one attacks a key of its own —
+ * a genuinely unimodular toy basis — because the demo's own HAWK-512/1024 keys
+ * are not unimodular and so have no cocycle to recover. See src/lip-attack.ts.
+ */
+async function runLipAttackDemo(): Promise<void> {
+  state.busyLipAttack = true;
+  setStatusMessage(null);
+  setLiveMessage(
+    `Running the 2026 key-recovery reduction against a toy HAWK-${state.lipAttackDegree} public key.`,
+  );
+  render();
+
+  // Yield so the busy state paints before the (synchronous, ~1-2s at n=8) run.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  try {
+    const run = runLipAttack(state.lipAttackDegree, () => Math.random());
+    state.lipAttack = run;
+    setLiveMessage(
+      run.gramMatches
+        ? `Key recovered from the public key alone in ${run.elapsedMs.toFixed(0)} milliseconds. The recovered basis satisfies B′*B′ = Q.`
+        : 'The attack did not recover a basis on this run.',
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Attack run failed.';
+    setStatusMessage(message);
+  } finally {
+    state.busyLipAttack = false;
+    render();
+  }
+}
+
+function lipAttackMarkup(): string {
+  const run = state.lipAttack;
+  const degreeButtons = TOY_DEGREES.map(
+    (d) => `
+      <button type="button" role="radio" aria-checked="${state.lipAttackDegree === d}"
+        data-lip-degree="${d}" class="${state.lipAttackDegree === d ? 'active' : ''}"
+        ${state.busyLipAttack ? 'disabled' : ''}>n = ${d}</button>`,
+  ).join('');
+
+  const stages = run
+    ? `
+      <ol class="attack-stages">
+        ${run.stages
+          .map(
+            (stage) => `
+          <li class="${stage.ok ? 'stage-ok' : 'stage-bad'}">
+            <span class="stage-mark" aria-hidden="true">${stage.ok ? '✓' : '✗'}</span>
+            <div>
+              <strong>${escapeHtml(stage.title)}</strong>
+              <span class="stage-detail">${escapeHtml(stage.detail)}</span>
+              <span class="stage-result">${escapeHtml(stage.result)}</span>
+            </div>
+          </li>`,
+          )
+          .join('')}
+      </ol>
+      <div class="attack-verdict ${run.gramMatches ? 'recovered' : 'failed'}" role="status">
+        <strong>${run.gramMatches ? 'Secret key recovered from the public key alone.' : 'No key recovered.'}</strong>
+        <p>
+          ${
+            run.gramMatches
+              ? `Took ${run.elapsedMs.toFixed(0)} ms. The attacker saw only Q. ${
+                  run.identicalToSecret
+                    ? 'This run happened to land on the original basis.'
+                    : 'The recovered basis is <em>not</em> the original one — it is a different basis with the same Gram matrix, which signs just as well. Key recovery asks for any B′ with B′*B′ = Q, and the paper reports the same thing: "distinct but unitarily-equivalent secret keys."'
+                }`
+              : 'Re-run to try another key.'
+          }
+        </p>
+      </div>
+      <div class="attack-keys">
+        <div>
+          <h5>Public key Q — the only input</h5>
+          <pre class="mono-block">${escapeHtml(run.publicKey)}</pre>
+        </div>
+        <div>
+          <h5>Recovered basis B′ — never saw the secret</h5>
+          <pre class="mono-block">${escapeHtml(run.recoveredBasis ?? '—')}</pre>
+        </div>
+        <div>
+          <h5>Secret basis B — for comparison only</h5>
+          <pre class="mono-block">${escapeHtml(run.secretBasis)}</pre>
+        </div>
+      </div>`
+    : '<p class="mini-note">Nothing run yet. The attack generates its own toy key, publishes only Q, and then works from Q alone.</p>';
+
+  return `
+    <div class="attack-runner">
+      <h4>Run it yourself</h4>
+      <p>
+        The reduction below is the paper's, at a size that finishes in a browser tick. At n = ${state.lipAttackDegree}
+        the shortest-vector step runs in dimension n/2 + 1 = ${state.lipAttackDegree / 2 + 1}, so plain LLL stands in for
+        the sieve a real attack needs. At HAWK-512 that dimension is 257, which is why this is a demonstration of the
+        mechanism and not a break of anything.
+      </p>
+      <div class="attack-controls">
+        <div class="lip-controls" role="radiogroup" aria-label="Toy ring degree">${degreeButtons}</div>
+        <button class="primary-button" type="button" data-action="run-lip-attack"
+          ${state.busyLipAttack ? 'disabled' : ''} aria-busy="${state.busyLipAttack}">
+          ${state.busyLipAttack ? 'Recovering…' : 'Recover the key from the public key'}
+        </button>
+        ${run ? '<button class="ghost-button" type="button" data-action="lip-attack-reset">Clear</button>' : ''}
+      </div>
+      <div class="attack-output" aria-live="polite">${stages}</div>
+    </div>
+  `;
+}
+
 function bindEvents(): void {
   document.querySelectorAll<HTMLButtonElement>('[data-scheme]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -2231,6 +2476,31 @@ function bindEvents(): void {
       setPendingFocus('[data-action="sampler-gap"]');
       render();
     }
+  });
+
+  const lipAttackButton = document.querySelector<HTMLButtonElement>('[data-action="run-lip-attack"]');
+  lipAttackButton?.addEventListener('click', () => {
+    void runLipAttackDemo();
+  });
+
+  const lipAttackReset = document.querySelector<HTMLButtonElement>('[data-action="lip-attack-reset"]');
+  lipAttackReset?.addEventListener('click', () => {
+    state.lipAttack = null;
+    setPendingFocus('[data-action="run-lip-attack"]');
+    render();
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('[data-lip-degree]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const degree = Number(button.dataset.lipDegree) as ToyDegree;
+      if (degree === state.lipAttackDegree) {
+        return;
+      }
+      state.lipAttackDegree = degree;
+      state.lipAttack = null;
+      setPendingFocus(`[data-lip-degree="${degree}"]`);
+      render();
+    });
   });
 
   const boundSlider = document.querySelector<HTMLInputElement>('[data-role="bound-slider"]');

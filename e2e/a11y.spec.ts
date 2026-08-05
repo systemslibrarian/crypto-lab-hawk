@@ -65,6 +65,15 @@ async function driveExhibitThree(page: Page): Promise<void> {
   await page.waitForSelector('[data-action="sampler-gap-reset"]', { timeout: 180_000 });
 }
 
+/**
+ * Exhibit 1.5's attack runner injects its stage list, verdict and key blocks
+ * only after it has run. Same reasoning as driveExhibitThree.
+ */
+async function driveAttackRunner(page: Page): Promise<void> {
+  await page.click('[data-action="run-lip-attack"]');
+  await page.waitForSelector('#cryptanalysis-2026 .attack-verdict', { timeout: 120_000 });
+}
+
 async function scan(page: Page): Promise<void> {
   const results = await new AxeBuilder({ page }).withTags(TAGS).analyze();
   const summary = results.violations.map((v) => ({
@@ -80,6 +89,7 @@ test('no WCAG A/AA violations in dark theme', async ({ page }) => {
   test.slow();
   await page.goto('.');
   await driveExhibitThree(page);
+  await driveAttackRunner(page);
   await revealEverything(page);
   await scan(page);
 });
@@ -90,6 +100,7 @@ test('no WCAG A/AA violations in light theme', async ({ page }) => {
   await page.locator('#cl-theme-toggle').click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await driveExhibitThree(page);
+  await driveAttackRunner(page);
   await revealEverything(page);
   await scan(page);
 });

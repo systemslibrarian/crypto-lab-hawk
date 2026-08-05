@@ -11,7 +11,8 @@
     "verify:phase3": "tsx scripts/verify-phase3.ts",
     "verify:phase4": "tsx scripts/verify-phase4.ts",
     "verify:phase5": "tsx scripts/verify-phase5.ts",
-    "test": "npm run verify:phase1 && npm run verify:phase2 && npm run verify:phase3 && npm run verify:phase4 && npm run verify:phase5",
+    "verify:phase6": "tsx scripts/verify-phase6.ts",
+    "test": "npm run verify:phase1 && npm run verify:phase2 && npm run verify:phase3 && npm run verify:phase4 && npm run verify:phase5 && npm run verify:phase6",
     "test:a11y": "playwright test",
     "preview": "vite preview"
   },
