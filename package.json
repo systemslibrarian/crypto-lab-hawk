@@ -19,7 +19,7 @@
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
     "@playwright/test": "^1.61.1",
-    "@types/node": "^22.15.3",
+    "@types/node": "^26.1.2",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3",
     "vite": "^7.0.0"
