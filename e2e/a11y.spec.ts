@@ -21,7 +21,7 @@ async function revealEverything(page: Page): Promise<void> {
       transition-duration:0s !important;
       transition-delay:0s !important;
     }
-    .cdt-step.pending{opacity:1 !important;}`;
+    .cdt-step.pending{}`;
     document.head.appendChild(style);
 
     // Native <details> (none expected here, but harmless if added later).
