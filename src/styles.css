@@ -22,6 +22,13 @@
   --amber: #ffaa00;
   --magenta: #ff40bd;
   --green: #00ff88;
+  /* Text-only variants. --magenta and --green are also solid fills (the
+     roadmap dots, the deployment bars), so they cannot simply be moved: this
+     splits the ink from the fill. --magenta at #ff40bd is 3.92:1 as label text
+     on the withdrawal notice; #ff66c6 is 4.65:1. --green already clears AA on
+     the dark badge, so the dark ink is the token itself. */
+  --magenta-ink: #ff66c6;
+  --green-ink: #00ff88;
   --purple: #b98af5;
   --gold: #ffd700;
   --shadow: 0 28px 80px rgba(0, 0, 0, 0.35);
@@ -48,6 +55,11 @@
   --amber: #8a5c00;
   --magenta: #ad006d;
   --green: #067647;
+  /* Light-theme inks, both a shade darker than the fill token: #ad006d landed
+     at 4.40:1 on the withdrawal notice and #067647 at 4.30:1 on the pass
+     badge's tinted pill. */
+  --magenta-ink: #a30066;
+  --green-ink: #056b40;
   --purple: #6d28d9;
   --gold: #7d5b00;
   --shadow: 0 24px 60px rgba(51, 67, 84, 0.12);
@@ -154,9 +166,9 @@ button:disabled {
 .cl-hero-why-label{display:block;font-size:.68rem;font-weight:700;letter-spacing:.14em;}
 .cl-hero-why-text{margin:.35rem 0 0;font-size:.95rem;line-height:1.5;}
 .cl-hero-withdrawn{border:1px solid color-mix(in srgb,var(--magenta) 50%,transparent);border-left-width:4px;border-radius:10px;padding:.85rem 1.05rem;background:color-mix(in srgb,var(--magenta) 12%,transparent);}
-.withdrawn-flag{display:inline-block;font-size:.68rem;font-weight:700;letter-spacing:.14em;color:var(--magenta);}
+.withdrawn-flag{display:inline-block;font-size:.68rem;font-weight:700;letter-spacing:.14em;color:var(--magenta-ink);}
 .cl-hero-withdrawn p{margin:.35rem 0 0;font-size:.92rem;line-height:1.5;color:var(--text);}
-.cl-hero-withdrawn a{color:var(--magenta);font-weight:600;white-space:nowrap;}
+.cl-hero-withdrawn a{color:var(--magenta-ink);font-weight:600;white-space:nowrap;}
 @media (max-width:640px){.cl-hero{flex-direction:column;}.cl-hero-side{flex-basis:auto;width:100%;}.cl-hero-main{flex-basis:auto;min-width:0;}}
 
 .hero-meta {
@@ -1311,12 +1323,11 @@ blockquote footer {
   font-size: 0.88rem;
 }
 
+/* Underlined at rest, not only on hover: these links sit inside a run of body
+   copy, so colour alone was the only thing marking them as links (WCAG 1.4.1),
+   and a hover-only underline reaches neither keyboard nor touch users. */
 .footer-meta a {
   color: var(--cyan);
-  text-decoration: none;
-}
-
-.footer-meta a:hover {
   text-decoration: underline;
 }
 
@@ -1365,7 +1376,7 @@ blockquote footer {
 .self-test-badge.pass {
   background-color: rgba(0, 255, 136, 0.12);
   border-color: rgba(0, 255, 136, 0.4);
-  color: var(--green);
+  color: var(--green-ink);
 }
 
 .self-test-badge.fail {

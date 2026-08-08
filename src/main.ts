@@ -536,7 +536,7 @@ function gaussianMarkup(): string {
   const ratio = state.gaussian.falconSampleMs / Math.max(state.gaussian.hawkSampleMs, 0.0001);
 
   return `
-    <div class="stats-grid compact" aria-label="Gaussian sampler statistics">
+    <div class="stats-grid compact" role="group" aria-label="Gaussian sampler statistics">
       <article class="metric-card accent-cyan">
         <span>HAWK integer sampler</span>
         <strong>${formatMs(state.gaussian.hawkSampleMs)}</strong>
@@ -616,7 +616,7 @@ function signingMarkup(): string {
   const benchmark = state.signing.benchmark;
 
   return `
-    <div class="stats-grid" aria-label="Signing statistics">
+    <div class="stats-grid" role="group" aria-label="Signing statistics">
       <article class="metric-card accent-green">
         <span>Verification</span>
         <strong>${state.signing.verified ? 'PASS' : 'FAIL'}</strong>
@@ -1040,8 +1040,8 @@ function lipSvgInner(): string {
         <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
       </marker>
     </defs>
-    <g class="lip-grid">${dots}</g>
-    <g class="lip-walk">${walkArrows}</g>
+    <g class="lip-grid">${dots.join('')}</g>
+    <g class="lip-walk">${walkArrows.join('')}</g>
     <g class="lip-basis">${basisVectors}</g>
     <line x1="${nearestX}" y1="${nearestY}" x2="${targetX}" y2="${targetY}" stroke="var(--magenta)" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.7"/>
     <circle cx="${nearestX}" cy="${nearestY}" r="7" class="lip-nearest"/>
@@ -1136,7 +1136,7 @@ function cryptanalysisMarkup(): string {
         a basis that signs. Prior work had proved such an automorphism <em>would</em> break the scheme; what
         was missing was a demonstration that HAWK's own lattice contains one. It does.
       </p>
-      <div class="table-scroll">
+      <div class="table-scroll" tabindex="0" role="region" aria-label="Key-recovery cost table (scroll horizontally to see all columns)">
         <table class="cryptanalysis-table">
           <caption>Key-recovery cost in the AGPS20 gate model, HAWK v1.1 spec versus the 2026 reduction.</caption>
           <thead>
@@ -1363,7 +1363,7 @@ function verifyMathMarkup(): string {
   const targetPreview = previewPolynomial(detail.q01, 8);
 
   return `
-    <div class="verify-math" aria-label="Verification math">
+    <div class="verify-math" role="group" aria-label="Verification math">
       <ol class="verify-steps">
         <li>
           <span class="verify-label">Recompute the message target h = Hash(pk, salt, m) mod 2</span>
@@ -1751,7 +1751,10 @@ function render(): void {
           <a class="status-badge cryptanalysis" href="#cryptanalysis-2026">Why it was withdrawn</a>
           ${selfTestBadgeMarkup()}
         </div>
-        <div class="hero-live" aria-live="polite" aria-label="Live stats from this session">
+        <!-- role="status" so the aria-label is not discarded: ARIA prohibits a
+             name on a role-less div, and browsers drop it silently. status also
+             carries the implicit aria-live="polite" already declared here. -->
+        <div class="hero-live" role="status" aria-live="polite" aria-label="Live stats from this session">
           <p class="eyebrow">Live from this session</p>
           ${heroLiveStatsMarkup()}
         </div>
