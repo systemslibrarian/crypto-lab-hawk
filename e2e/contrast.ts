@@ -10,12 +10,11 @@ import type { Page } from '@playwright/test';
  *    files the node under `incomplete`. That covers most of this page: `body`
  *    lays two radial washes and a linear ramp behind the entire document, and
  *    every `.exhibit` is itself a `linear-gradient(--panel, --panel-strong)`
- *    with a purple radial `::after` on top. This blind spot is not hypothetical
- *    here — the WITHDRAWN flag sat at 3.92:1 and the pass badge at 4.30:1, and
- *    axe reported neither, because both sit on gradient-composited panels.
+ *    with a purple radial `::after` on top. Not hypothetical here — the
+ *    WITHDRAWN flag sat at 3.92:1 and axe reported nothing.
  *  - text faded by an ancestor's `opacity` — axe reads the declared `color`,
- *    which is not the colour that lands on screen. Disabled buttons here drop to
- *    `opacity: 0.7`, and `.cl-hero-sub` renders at `opacity: .85`.
+ *    which is not the colour that lands on screen. Disabled buttons here drop
+ *    to `opacity: 0.7`, and `.cl-hero-sub` renders at `opacity: .85`.
  *
  * So: walk every element that owns text, composite the real painted result
  * (translucent colours, gradient stops and opacity groups included), and
@@ -54,10 +53,10 @@ import type { Page } from '@playwright/test';
  *    and reports a fixed 1:1. There is no contrast requirement on ink that is
  *    never laid down.
  *
- *  - SVG PAINTS IN DOCUMENT ORDER, SO SIBLINGS CAN BE THE BACKGROUND. The three
- *    lattice and histogram figures are `<svg>`: each draws a shape as a `<rect>`
- *    or `<circle>` and then its label as a following `<text>`, so a label's
- *    backdrop is a PRECEDING SIBLING shape, not an ancestor. An ancestor-only
+ *  - SVG PAINTS IN DOCUMENT ORDER, SO SIBLINGS CAN BE THE BACKGROUND. The
+ *    lattice and histogram figures draw a shape as a `<rect>` or `<circle>` and
+ *    then its label as a following `<text>`, so a label's backdrop is a
+ *    PRECEDING SIBLING shape, not an ancestor. An ancestor-only
  *    walk would composite those labels onto the svg's own transparent background
  *    and report a ratio nothing on screen has. So for SVG text, any earlier
  *    sibling shape whose box contains the text box is composited first.
@@ -89,10 +88,9 @@ export async function auditContrast(page: Page): Promise<ContrastFailure[]> {
     /**
      * Resolve ANY CSS colour to straight-alpha sRGB via a 1×1 canvas.
      *
-     * A hand-rolled `rgba()` regex is not enough here: this page authors its
-     * mixes accents into surfaces with `color-mix()` in both `oklab` and `srgb`
-     * (the hero panels, the withdrawal notice, the pass/fail badges, the
-     * roadmap rows — fourteen sites), and Chromium reports those
+     * A hand-rolled `rgba()` regex is not enough here: this page mixes accents
+     * into surfaces with `color-mix()` in both `oklab` and `srgb` across 14
+     * sites, and Chromium reports those
      * to `getComputedStyle` unchanged rather than converting them to sRGB. A
      * regex that only understands `rgb()/rgba()` sees `null` for every one of
      * them and the walk then falls through to the wrong backdrop — which
@@ -419,8 +417,14 @@ export async function auditContrast(page: Page): Promise<ContrastFailure[]> {
         sib = sib.previousElementSibling;
       }
       // Earliest sibling first — that is the order the compositor paints in.
+      // Only shapes that actually PAINT A FILL can be a backdrop. SVG's initial
+      // `fill` is black, and `getComputedStyle` reports that for stroke-only
+      // geometry too — so a <line> used as a grid rule or axis reads as an
+      // opaque black rectangle covering whatever it crosses. Compositing that
+      // invented a 3.82:1 failure for labels whose real ratio is 6.15:1.
+      const FILLED = ['rect', 'circle', 'ellipse', 'polygon', 'path'];
       for (const s of stack.reverse()) {
-        if (s.tagName === 'text' || s.tagName === 'title' || s.tagName === 'desc') continue;
+        if (!FILLED.includes(s.tagName.toLowerCase())) continue;
         if (!contains(rectOf(s), box)) continue;
         const scs = styleOf(s);
         const fill = resolve(scs.fill);
@@ -475,8 +479,7 @@ export async function auditContrast(page: Page): Promise<ContrastFailure[]> {
     /**
      * WCAG 1.4.3 exempts text that is part of an *inactive* user-interface
      * component, and axe skips disabled controls for the same reason. Honour
-     * that here so a deliberately dimmed disabled control — the CDT "Step"
-     * button at `opacity: 0.7` once the walk is complete — is not reported as a
+     * that here so a deliberately dimmed disabled control is not reported as a
      * failure the spec does not actually require fixing.
      */
     const inactive = (el: Element): boolean => {
@@ -532,8 +535,8 @@ export async function auditContrast(page: Page): Promise<ContrastFailure[]> {
       if (nonRenderingSvgText(el)) continue;
 
       const cs = styleOf(el);
-      // SVG text takes its ink from `fill`, not `color`. The lattice and
-      // histogram figures label their axes with `<text>`, and reading `color` there
+      // SVG text takes its ink from `fill`, not `color`. Reading `color` on an
+      // SVG <text>
       // measures an inherited value the glyphs are not painted in.
       const svgText = el.namespaceURI === 'http://www.w3.org/2000/svg';
       const fgRaw = resolve(svgText ? cs.fill : cs.color);
