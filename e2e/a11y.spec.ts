@@ -1,5 +1,5 @@
 import { test } from '@playwright/test';
-import { boot, driveAllStates, NARROW } from './gate';
+import { boot, driveAllStates, expectBaselineNotStale, NARROW } from './gate';
 
 /**
  * WCAG A/AA regression gate. Deploys are already gated on the phase-verify
@@ -22,6 +22,17 @@ for (const theme of ['dark', 'light'] as const) {
     test.setTimeout(900_000);
     await boot(page, theme);
     await driveAllStates(page, theme);
+
+    // The third ratchet rule — a baselined finding that no longer appears must
+    // be deleted, so the list can only shrink. `expectBaselineNotStale` was
+    // exported from `gate.ts` and imported by nothing, so it had never run.
+    //
+    // Called in all four configurations, which this lab's baseline permits:
+    // every one of the ten entries is produced by every configuration, checked
+    // through the gate's own capture path rather than assumed. (Sibling labs do
+    // not have that luxury — where a control is accent-bordered it fails in one
+    // theme only, and the check has to be scoped to the drive that sees it.)
+    expectBaselineNotStale();
   });
 
   test(`no WCAG A/AA violations in ${theme} theme at 380px`, async ({ page }) => {
@@ -29,5 +40,6 @@ for (const theme of ['dark', 'light'] as const) {
     await page.setViewportSize(NARROW);
     await boot(page, theme);
     await driveAllStates(page, `${theme} @380px`);
+    expectBaselineNotStale();
   });
 }
