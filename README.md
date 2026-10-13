@@ -107,7 +107,7 @@ This is a separate module (`src/lip-attack.ts`) from the HAWK-512/1024 teaching 
 Use this repo when you want to:
 
 - Understand how the lattice-signature frontier looked in 2026, and how fast it moved
-- Explain why Falcon's floating-point Gaussian sampler remains a deployment liability
+- Explain Falcon’s precision-sensitive Gaussian sampling and implementation-specific side-channel risks, including floating-point reference implementations and fixed-point alternatives
 - Compare HAWK's smLIP-based design against ML-DSA and Falcon
 - Show students how discrete Gaussian sampling over Z differs from Falcon's lattice-centered sampling
 - Illustrate why HAWK was attractive for constrained devices, FHE, and MPC-oriented discussions — and why that was not enough
@@ -162,6 +162,8 @@ npm run dev
 - [crypto-lab-hybrid-sign](https://systemslibrarian.github.io/crypto-lab-hybrid-sign/) — composite Ed25519 + ML-DSA-65 signatures for transitional deployment.
 
 ## References
+
+- Halmans, Kumar and Güneysu, [*Flying, Not Floating: Precise Fixed-Point Falcon on Embedded Processors*](https://eprint.iacr.org/2026/2431), ePrint 2026/2431, released 12 October 2026 — preprint reporting fixed-point Falcon-512/1024 on Cortex-M4. This is an implementation result with precision and memory tradeoffs, not a final FN-DSA standard or independent side-channel assurance. This lab retains its illustrative float-heavy sampler.
 
 - Ducas, Postlethwaite, Pulles, van Woerden, Hawk: Module LIP makes Lattice Signatures Fast, Compact and Simple, ASIACRYPT 2022
 - HAWK v1.1 specification, February 5, 2025

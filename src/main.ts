@@ -99,10 +99,10 @@ const schemeCopy: Record<SchemeKey, { title: string; accent: string; summary: st
   falcon: {
     title: 'Falcon / FN-DSA',
     accent: 'amber',
-    summary: 'Compact and fast, but its floating-point Gaussian sampler is the long-term implementation liability.',
+    summary: 'Compact and fast, but precise Gaussian sampling and side-channel hardening remain implementation challenges.',
     bullets: [
       'Hard problem: NTRU-SIS',
-      'Requires floating-point Gaussian sampling over a lattice',
+      'Requires sufficiently precise Gaussian sampling over a lattice',
       'No outer restart loop, but SamplerZ rejects internally',
       'Constant-time hardening is difficult',
       'Currently progressing toward FIPS 206',
@@ -141,7 +141,7 @@ const paramOptions: Record<ParamKey, typeof HAWK_512_PARAMS | typeof HAWK_1024_P
 type CrossLink = { name: string; href: string; blurb: string };
 
 const crossLinks: CrossLink[] = [
-  { name: 'crypto-lab-falcon-seal', href: 'https://github.com/systemslibrarian/crypto-lab-falcon-seal', blurb: 'Falcon float sampler walkthrough' },
+  { name: 'crypto-lab-falcon-seal', href: 'https://github.com/systemslibrarian/crypto-lab-falcon-seal', blurb: 'Falcon trapdoor and sampler walkthrough' },
   { name: 'crypto-lab-dilithium-seal', href: 'https://github.com/systemslibrarian/crypto-lab-dilithium-seal', blurb: 'ML-DSA signing internals' },
   { name: 'crypto-lab-dilithium-reject', href: 'https://github.com/systemslibrarian/crypto-lab-dilithium-reject', blurb: 'Rejection-loop variance lab' },
   { name: 'crypto-lab-sphincs-ledger', href: 'https://github.com/systemslibrarian/crypto-lab-sphincs-ledger', blurb: 'SLH-DSA stateless hash signatures' },
@@ -167,8 +167,8 @@ const compareRows: CompareRow[] = [
   { dimension: 'Hard problem', falcon: 'NTRU-SIS', mldsa: 'Module-LWE + SIS', hawk: 'module-LIP + omSVP' },
   { dimension: 'Signature size (NIST-I)', falcon: '666 B', mldsa: '2,420 B', hawk: '555 B' },
   { dimension: 'Public key (NIST-I)', falcon: '897 B', mldsa: '1,312 B', hawk: '1,024 B' },
-  { dimension: 'Core arithmetic', falcon: 'Floating-point', mldsa: 'Integer', hawk: 'Integer only' },
-  { dimension: 'Signing sampler', falcon: 'Float Gaussian over a lattice', mldsa: 'Uniform + rejection', hawk: 'Integer Gaussian over Z (CDT)' },
+  { dimension: 'Core arithmetic', falcon: 'Floating-point reference; fixed-point alternatives', mldsa: 'Integer', hawk: 'Integer only' },
+  { dimension: 'Signing sampler', falcon: 'Precision-sensitive lattice Gaussian', mldsa: 'Uniform + rejection', hawk: 'Integer Gaussian over Z (CDT)' },
   { dimension: 'Outer signing restart loop?', falcon: 'No', mldsa: 'Yes (≈3–5 iterations)', hawk: 'Rare (norm bound only)' },
   { dimension: 'Rejection inside the sampler?', falcon: 'Yes (SamplerZ accept/reject)', mldsa: 'Yes (that is the outer loop)', hawk: 'No (fixed table walk)' },
   { dimension: 'Constant-time posture', falcon: 'Hard to achieve', mldsa: 'Mixed', hawk: 'Designed in' },
@@ -182,7 +182,7 @@ const glossary: GlossaryTerm[] = [
   { slug: 'automorphism', term: 'Galois automorphism (τ)', short: 'A symmetry of the number field that HAWK’s public key turns out to expose — the basis of the 2026 attack.', full: 'HAWK works over the cyclotomic field Q(ζ) for a power-of-two root of unity ζ. That field has symmetries (Galois automorphisms) that permute its elements while preserving arithmetic. Every prior module-LIP attack used only one of them, complex conjugation. Straznickas and Weis used a second, τ: ζ ↦ −ζ, and showed that the public Gram matrix Q alone pins down the τ-cocycle V = B⁻¹τ(B) as the shortest vector of a publicly computable lattice of rank n. That lattice is near-hypercubic, so a known reduction finds V with shortest-vector calls in dimension n/2 + 1 instead of the full-rank search HAWK’s parameters were sized against — halving the attack dimension and, with it, roughly halving the effective key strength.' },
   { slug: 'omsvp', term: 'omSVP', short: 'One-more Short Vector Problem — HAWK’s second supporting assumption.', full: 'The one-more Short Vector Problem (omSVP) is the assumption that, even after seeing many HAWK signatures, an attacker cannot produce one more short lattice vector of the kind a valid signature reveals. It backs HAWK’s unforgeability alongside module-LIP.' },
   { slug: 'ntru', term: 'NTRU', short: 'A ring-based lattice family; Falcon’s keys solve an NTRU equation.', full: 'NTRU is a family of lattice problems built over polynomial rings. Falcon’s key generation must solve the NTRU equation f·G − g·F = q, which can fail for a sampled basis and force a retry. HAWK reuses NTRU-style structure but leans on the Lattice Isomorphism Problem for its security.' },
-  { slug: 'discrete-gaussian', term: 'Discrete Gaussian', short: 'A bell-curve distribution sampled over the integers instead of the reals.', full: 'A discrete Gaussian assigns each integer k a probability proportional to exp(−k² / 2σ²). Lattice signatures need samples from this distribution so the signature leaks nothing about the secret basis. HAWK samples it over Z with fixed integer tables; Falcon samples a Gaussian over a lattice using floating-point math.' },
+  { slug: 'discrete-gaussian', term: 'Discrete Gaussian', short: 'A bell-curve distribution sampled over the integers instead of the reals.', full: 'A discrete Gaussian assigns each integer k a probability proportional to exp(−k² / 2σ²). Lattice signatures need samples from this distribution so the signature leaks nothing about the secret basis. HAWK samples it over Z with fixed integer tables; Falcon samples a Gaussian over a lattice with carefully controlled numerical precision; reference implementations use floating point, and fixed-point alternatives exist.' },
   { slug: 'cdt', term: 'CDT', short: 'Cumulative Distribution Table — sample by comparing one random word to fixed thresholds.', full: 'A Cumulative Distribution Table stores the running probability thresholds of a distribution. To sample, you draw one uniform random word and count how many thresholds it falls under — that count is the magnitude. Because every draw runs the same fixed comparisons with no early exit, the operation is naturally constant-time.' },
   { slug: 'rejection-sampling', term: 'Rejection sampling', short: 'Draw a candidate, accept or retry — so the loop count (and timing) varies.', full: 'Rejection sampling proposes a candidate and accepts it with some probability, retrying otherwise. ML-DSA’s signing uses it as an outer loop and averages a few iterations, which makes signing time data-dependent. Falcon has no outer loop, but its SamplerZ does reject internally — the Falcon-style sampler raced in Exhibit 2 is a genuine `while (true)` accept/reject loop for exactly that reason. HAWK is the one design here whose sampler is a fixed table walk with no accept/reject at all; its signing still restarts if the resulting vector overshoots the length bound.' },
   { slug: 'constant-time', term: 'Constant-time', short: 'Runs in the same time regardless of secret data, defeating timing attacks.', full: 'Constant-time code takes the same amount of time and the same memory-access pattern no matter what the secret inputs are, so an attacker measuring timing learns nothing. Floating-point math and data-dependent loops make this hard, which is why HAWK’s integer-only, loop-free signing path is attractive.' },
@@ -527,7 +527,7 @@ function gaussianMarkup(): string {
     const previewPmf = discreteGaussianPmf(EXPECTED_SIGMA, 6);
     return `
       <div class="status-card muted">
-        <p>Run the sampler to compare HAWK's integer-table lookup against a real Box-Muller plus rejection float sampler of the kind Falcon's signing path is built on. Below is the theoretical discrete-Gaussian target the observed bars will land on.</p>
+        <p>Run the sampler to compare HAWK's integer-table lookup against a real Box-Muller plus rejection float sampler used here to illustrate implementation costs; it is not Falcon’s production sampler. Below is the theoretical discrete-Gaussian target the observed bars will land on.</p>
       </div>
       ${svgHistogram([], previewPmf, 1)}
     `;
@@ -1771,10 +1771,10 @@ function render(): void {
         <div class="scheme-grid" role="radiogroup" aria-label="Signature scheme comparison cards">
           <button class="scheme-card accent-amber ${state.selectedScheme === 'falcon' ? 'active' : ''}" type="button" role="radio" tabindex="${state.selectedScheme === 'falcon' ? '0' : '-1'}" data-scheme="falcon" aria-checked="${state.selectedScheme === 'falcon'}" aria-describedby="scheme-detail-panel">
             <h3>Falcon</h3>
-            <p>Small signatures, difficult floating-point hardening.</p>
+            <p>Small signatures, demanding sampler hardening.</p>
             <ul>
               <li>NTRU-SIS</li>
-              <li>Float Gaussian over a lattice</li>
+              <li>Precision-sensitive lattice Gaussian</li>
               <li>FIPS 206 in progress</li>
             </ul>
           </button>
@@ -1792,8 +1792,8 @@ function render(): void {
             <p>Integer-only Gaussian sampling over Z with no rejection loop.</p>
             <ul>
               <li>smLIP + omSVP</li>
-              <li>Round 2 On-Ramp</li>
-              <li>Potential Falcon successor</li>
+              <li>Withdrawn from NIST, July 2026</li>
+              <li>Historical design comparison</li>
             </ul>
           </button>
         </div>
@@ -1804,7 +1804,7 @@ function render(): void {
           </article>
           <article>
             <span>Signing posture</span>
-            <strong>Falcon: float lattice work | ML-DSA: rejection loop | HAWK: single integer pass</strong>
+            <strong>Falcon: precision-sensitive sampling | ML-DSA: rejection loop | HAWK: single integer pass</strong>
           </article>
           <article>
             <span>Constant-time posture</span>
@@ -1812,6 +1812,7 @@ function render(): void {
           </article>
         </div>
         ${schemeDetailMarkup()}
+        <p>Research update, 12 October 2026: <a href="https://eprint.iacr.org/2026/2431" target="_blank" rel="noreferrer">Halmans, Kumar and Güneysu, <em>Flying, Not Floating</em></a>, report fixed-point Falcon-512/1024 signing on Cortex-M4. This preprint demonstrates an alternative to floating-point arithmetic, with precision and memory tradeoffs. It does not certify side-channel resistance or finalize FN-DSA. The float-heavy sampler below remains an educational comparison, not that implementation.</p>
         <h3 class="compare-heading">Full comparison, at a glance</h3>
         ${comparisonTableMarkup()}
       </section>
@@ -1830,11 +1831,11 @@ function render(): void {
         <div class="section-heading">
           <span class="eyebrow">Exhibit 2</span>
           <h2 id="exhibit-two-title">The Gaussian Sampling Difference</h2>
-          <p>HAWK samples a ${termChip('discrete-gaussian')} over Z with fixed integer tables (a ${termChip('cdt')}). Falcon samples over a lattice with floating-point machinery and ${termChip('rejection-sampling', 'rejection sampling')}. The histogram below overlays observed counts on the closed-form theoretical PMF.</p>
+          <p>HAWK samples a ${termChip('discrete-gaussian')} over Z with fixed integer tables (a ${termChip('cdt')}). Floating-point reference Falcon implementations sample over a lattice with ${termChip('rejection-sampling', 'rejection sampling')}. The histogram below overlays observed counts on the closed-form theoretical PMF.</p>
         </div>
         <div class="two-column">
           <article class="flow-card accent-amber">
-            <h3>Falcon path</h3>
+            <h3>Falcon reference path (floating point)</h3>
             <pre>hash message -> target c
 Babai rounding over lattice basis
 floating-point FFT and Gaussian steps
@@ -1938,7 +1939,7 @@ no transcendental functions anywhere</pre>
           </article>
           <article class="advice-card accent-cyan">
             <h3>If you care about constrained devices</h3>
-            <p>Stop tracking HAWK as a candidate — it is withdrawn. Its designers judged that restoring the margin, by doubling parameters or moving to higher-rank modules, would leave it uncompetitive. Falcon remains the compact option, with all its floating-point caveats intact.</p>
+            <p>Stop tracking HAWK as a candidate — it is withdrawn. Its designers judged that restoring the margin, by doubling parameters or moving to higher-rank modules, would leave it uncompetitive. Falcon remains a compact option, with precision and side-channel caveats for both floating-point and fixed-point implementations.</p>
           </article>
           <article class="advice-card accent-purple">
             <h3>If you care about FHE or MPC</h3>
