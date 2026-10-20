@@ -133,12 +133,20 @@ function bytesToUint64(bytes: Uint8Array, offset: number): bigint {
   return value;
 }
 
-async function sha256(data: Uint8Array): Promise<Uint8Array> {
+/* Exported so a published vector can be asserted THROUGH this function rather
+ * than against crypto.subtle directly: an assertion on subtle tests the
+ * runtime, not this lab's digest. */
+export async function sha256(data: Uint8Array): Promise<Uint8Array> {
   const digest = await getCrypto().subtle.digest('SHA-256', data as BufferSource);
   return new Uint8Array(digest);
 }
 
-async function expandDeterministic(seed: Uint8Array, label: string, length: number): Promise<Uint8Array> {
+/* Exported so its properties can be tested. This is the lab's OWN construction
+ * -- SHA-256 in counter mode with a label prefix -- not a standard XOF, so no
+ * published vector exists for it and none is claimed. What can be asserted is
+ * that it is deterministic, length-correct, label-separated, and that the
+ * counter actually advances between blocks. Real Hawk uses SHAKE256. */
+export async function expandDeterministic(seed: Uint8Array, label: string, length: number): Promise<Uint8Array> {
   const labelBytes = encoder.encode(label);
   const chunks: Uint8Array[] = [];
   let generated = 0;
