@@ -313,7 +313,13 @@ function quadraticFormNorm(
 
 /**
  * Sample a fresh short basis B = [[f,F],[g,G]] from the discrete Gaussian
- * over Z. This is where HAWK's integer-only sampler feeds real key material.
+ * over Z. This is where THIS BUILD's integer-only sampler feeds real key
+ * material, and it is a simplification rather than HAWK's key generation: HAWK
+ * samples f and g from a centred binomial and then solves the NTRU equation
+ * f·G − g·F = 1 for F and G (v1.1, §3.4, Algorithms 12 and 13), and reaches
+ * neither of its two Gaussian tables during keygen — both of those are signing
+ * tables (§3.5.1). Here all four polynomials are drawn independently from the
+ * table this lab labels T_0.
  */
 async function sampleBasis(
   seed: Uint8Array,
@@ -630,7 +636,7 @@ export async function hawkForgeFromPublicKey(
  * candidate answers to "given the message's parity target h, produce integer
  * coordinates c with (B mod 2)·c = h". The first is what this build's signer
  * runs. The second layers a real discrete-Gaussian offset on top of it, drawn
- * from HAWK's signing-time table T_1, and is the closest this build gets to
+ * from the table this lab labels T_1, and is the closest this build gets to
  * production HAWK's Gaussian coset sampler.
  *
  * They are exported so `src/sampler-gap.ts` can measure the difference between
@@ -672,7 +678,7 @@ export function solveCosetLinear(
 
 /**
  * The same solve with a real discrete-Gaussian coset offset: c' = c + 2z with
- * every z_i drawn from HAWK's signing table T_1 through the same constant-time
+ * every z_i drawn from the table this lab labels T_1 through the same constant-time
  * CDT walk the sampler exhibit shows. Adding 2z preserves c' ≡ c (mod 2), so
  * the parity coset — and therefore the verifier's message binding — is intact,
  * while the integer coordinates are now randomised per signature.

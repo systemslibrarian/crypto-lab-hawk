@@ -4,20 +4,40 @@ import { type Polynomial } from './polynomial';
  * Discrete Gaussian sampler over the integer lattice Z.
  * THIS IS THE KEY DIFFERENCE FROM FALCON.
  *
- * HAWK uses two fixed precomputed lookup tables, T_0 and T_1, and the CDT walk
- * below is a faithful model of how they are used: one uniform word, a fixed
+ * HAWK also samples through fixed precomputed lookup tables, and the CDT walk
+ * below is a faithful model of how one is used: one uniform word, a fixed
  * number of threshold comparisons, no early exit, no floating point.
  *
- * WHERE THIS BUILD DIVERGES: `sampleBasis` in hawk.ts uses T_0 to draw f, g, F,
- * G during key generation, so T_0 is on the real keygen path. T_1 is NOT
- * reached by `hawkSign`: this build's default signing path substitutes a mod-2
- * linear solve for HAWK's Gaussian coset sampler (see the honesty note on
- * `hawkSign`), so there is no default signing-time Gaussian draw for T_1 to
- * serve. T_1 is therefore exhibited standalone in Exhibit 2 — the histogram,
- * the timing race against the Falcon-style sampler, and the step-through walk
- * are all real samples from a real CDT, they are simply not feeding this
- * build's default signatures. Do not read Exhibit 2 as a trace of what happened
- * when you pressed "sign".
+ * WHAT THE SPECIFICATION'S T_0 AND T_1 ARE. In HAWK v1.1 both are SIGNING
+ * tables. Section 3.5.1, equations (36) and (37), define them from the tails of
+ * the two parity cosets of the signing Gaussian — T_0[k] = floor(2^78 ·
+ * P_0(2 + 2k)) over 2Z, T_1[k] = floor(2^78 · P_1(3 + 2k)) over 2Z + 1 — and
+ * Algorithm 14, `SamplerSign`, walks BOTH on every draw, keeping only the one
+ * the secret centre bit selects, precisely so the memory access pattern does
+ * not depend on that bit. Neither table is reached during key generation at
+ * all: HawkKeyGen samples f and g from a centred binomial (section 3.4,
+ * Algorithm 12, `Regeneratefg`) and then obtains F and G from NTRUSolve.
+ *
+ * WHAT THE TWO TABLES BELOW ARE. They are this lab's own simplification, not
+ * the specification's pair, and they are named T_0 and T_1 only by analogy.
+ * Both are seven-entry tail tables for a SINGLE centred discrete Gaussian over
+ * all of Z at an educational sigma ~= 1.425, scaled to 2^64; they agree with
+ * each other to three or four decimal places, where the specification's two
+ * differ by construction: in its Table 5 the leading entries are 0.605 and
+ * 0.301 for HAWK-256, 0.688 and 0.422 for HAWK-512, and 0.693 and 0.430 for
+ * HAWK-1024, because they describe different cosets.
+ *
+ * WHERE THIS BUILD DIVERGES, then: `sampleBasis` in hawk.ts uses T_0 to draw
+ * f, g, F AND G during key generation, which is not where HAWK draws any of
+ * them and is not what either specification table is for. T_1 is NOT reached by
+ * `hawkSign`: this build's default signing path substitutes a mod-2 linear solve
+ * for HAWK's Gaussian coset sampler (see the honesty note on `hawkSign`), so
+ * there is no default signing-time Gaussian draw for T_1 to serve. T_1 is
+ * therefore exhibited standalone in Exhibit 2 — the histogram, the timing race
+ * against the Falcon-style sampler, and the step-through walk are all real
+ * samples from a real CDT, they are simply not the specification's table and
+ * not feeding this build's default signatures. Do not read Exhibit 2 as a trace
+ * of what happened when you pressed "sign".
  *
  * T_1 does drive one real signing path. `solveCosetGaussian` in hawk.ts draws
  * one T_1 sample per coordinate coefficient to build a discrete-Gaussian coset
@@ -52,6 +72,12 @@ function randomSignBit(): number {
 /**
  * Tail thresholds scaled to 2^64 for an educational sigma ~= 1.425.
  * A sampled magnitude is the number of thresholds exceeded.
+ *
+ * Both tables below are tails of the SAME distribution — a centred discrete
+ * Gaussian over all of Z — so they are near-identical. They are this lab's own
+ * tables; the specification's T_0 and T_1 are the tails of two different parity
+ * cosets of the signing Gaussian (v1.1, §3.5.1, eqs. (36) and (37)), and those
+ * are not near-identical. See the header note.
  */
 export const DISCRETE_GAUSSIAN_TABLE_T0 = [
   13276121709848764416n,

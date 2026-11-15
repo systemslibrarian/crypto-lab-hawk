@@ -11,7 +11,7 @@ This is a Vite + TypeScript + vanilla CSS educational lab that compares Falcon, 
 The emphasis is on HAWK's architectural differences from Falcon:
 
 - No floating-point arithmetic in the core signing path
-- No accept/reject loop inside the sampler, unlike ML-DSA's outer rejection loop and Falcon's internal SamplerZ rejection
+- No accept/reject loop inside the sampler, unlike ML-DSA's outer rejection loop and Falcon's internal SamplerZ rejection (Falcon's signing restarts outside the sampler too, in two places — Falcon spec, Algorithm 10)
 - Integer-only discrete Gaussian sampling over Z with fixed tables
 - A simplified public/private basis story tied to the Lattice Isomorphism Problem
 - A browser-native exhibit showing why HAWK was positioned as Falcon's conceptual successor, and what the July 2026 key-recovery attack did to that story
@@ -37,7 +37,7 @@ Fixing it properly is not a small edit. It would need keygen to solve the NTRU e
 
 ### The sampler gap is measured, not asserted
 
-The natural next question is whether the *sampler* is the problem: if this build drew its coset representative from a real discrete Gaussian instead of solving a linear system mod 2, would the forgery stop? Exhibit 3 answers that with a bench rather than a paragraph. **Measure the sampler gap** builds a genuine discrete-Gaussian coset sampler — `solveCosetGaussian` draws one integer per coordinate coefficient from HAWK's signing table T₁ through the same constant-time CDT walk Exhibit 2 steps through, and adds 2z to the mod-2 solution — then runs both samplers against the same live key and message, measuring five structural properties plus the forgery outcome for each.
+The natural next question is whether the *sampler* is the problem: if this build drew its coset representative from a real discrete Gaussian instead of solving a linear system mod 2, would the forgery stop? Exhibit 3 answers that with a bench rather than a paragraph. **Measure the sampler gap** builds a genuine discrete-Gaussian coset sampler — `solveCosetGaussian` draws one integer per coordinate coefficient from this build's table T₁ through the same constant-time CDT walk Exhibit 2 steps through, and adds 2z to the mod-2 solution — then runs both samplers against the same live key and message, measuring five structural properties plus the forgery outcome for each.
 
 What comes out (measured on every run; typical figures at n = 512):
 
@@ -54,7 +54,7 @@ The Gaussian moves four of the five structural properties and leaves forgeabilit
 
 `scripts/verify-phase5.ts` pins every one of those properties, including the negative results and the failure paths — a shifted coefficient, a bound tightened below the norm, and a foreign public key each reject a Gaussian-coset signature — plus a check that the public Gram-matrix norm equals ‖B·c‖² recomputed from the secret basis at Gaussian coordinate magnitudes. `e2e/sampler-gap.spec.ts` pins that the browser really computes and renders them.
 
-What stays simplified elsewhere: a mod-2 coset solve instead of the full discrete-Gaussian lattice sampler (so table T1, the signing-time table, is not reached by the default signing path — it runs for real in Exhibit 2 and in the Gaussian column of the sampler-gap bench above, while T0 runs for real during keygen); schoolbook multiplication instead of the NTT; uncompressed serializers, so measured bytes (920 B signature, 14,336 B public key at n=512) run far above the HAWK v1.1 spec figures (555 B and 1,024 B), which Exhibit 3 now shows side by side; and a demo-calibrated acceptance bound roughly 12x above where genuine signatures land, which Exhibit 3 exposes as a slider so the norm-rejection loop and the restart counter become reachable instead of permanently reading 0. All of it is disclosed in the in-app honesty panel.
+What stays simplified elsewhere: a mod-2 coset solve instead of the full discrete-Gaussian lattice sampler, and two sampling tables of this lab's own (in the HAWK v1.1 specification T0 and T1 are *both* signing tables: equations (36) and (37) of §3.5.1 define them as the tail probabilities of the two parity cosets 2Z and 2Z+1, and Algorithm 14, `SamplerSign`, walks both on every draw, while key generation samples f and g from a centred binomial and solves the NTRU equation for F and G — §3.4, Algorithm 12. This build's two tables are instead near-identical educational tables for a single discrete Gaussian over Z at sigma ≈ 1.425, and it uses them differently: the one it labels T0 is what its keygen draws f, g, F and G from, and the one it labels T1 is not reached by the default signing path at all — it runs for real in Exhibit 2 and in the Gaussian column of the sampler-gap bench above); schoolbook multiplication instead of the NTT; uncompressed serializers, so measured bytes (920 B signature, 14,336 B public key at n=512) run far above the HAWK v1.1 spec figures (555 B and 1,024 B), which Exhibit 3 now shows side by side; and a demo-calibrated acceptance bound roughly 12x above where genuine signatures land, which Exhibit 3 exposes as a slider so the norm-rejection loop and the restart counter become reachable instead of permanently reading 0. All of it is disclosed in the in-app honesty panel.
 
 ## Security status: the July 2026 key-recovery attack
 
