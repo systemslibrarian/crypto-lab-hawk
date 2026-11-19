@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 
 /**
@@ -109,5 +110,26 @@ test.describe('what the page says module-LIP is', () => {
     await expect(page.locator('.lip-shell .mini-note').first()).toContainText(
       'This is what HAWK signs with',
     );
+  });
+
+  /* The README's exhibit list kept the sentence the page dropped: "What
+   * module-LIP means, shown as a short basis versus a bad basis over the same
+   * lattice". The same-lattice picture is basis reduction, not module-LIP, and
+   * the README has to draw the line where the page's caption draws it. */
+  test('the README draws the same line as the caption it describes', async ({ page }) => {
+    const readme = readFileSync('README.md', 'utf8').replace(/\\\*/g, '*').replace(/\s+/g, ' ');
+    expect(readme).not.toMatch(/What module-LIP means, shown as a short basis versus a bad basis/);
+    expect(readme).not.toMatch(/module-LIP[^.—]{0,40}over the \*same\* lattice/);
+    expect(readme).toContain('why module-LIP is a different problem: an isometry between two forms');
+    expect(readme).toContain('not a change of basis within one lattice, which is only linear algebra');
+
+    // The definition the README quotes is the one the page's caption prints.
+    await page.goto('.');
+    await page.locator('[data-lip="bad"]').click();
+    const caption = (await page.locator('.lip-shell .mini-note').first().innerText()).replace(/\s+/g, ' ');
+    for (const phrase of ['unimodular U with Q = U*U', 'HAWK v1.1 §6.6, Definition 7']) {
+      expect(caption).toContain(phrase);
+      expect(readme).toContain(phrase);
+    }
   });
 });
