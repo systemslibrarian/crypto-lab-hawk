@@ -28,6 +28,7 @@ import {
 import { HAWK_512_PARAMS, HAWK_1024_PARAMS } from './polynomial';
 import { runSamplerGap, type SamplerGapReport } from './sampler-gap';
 import { runLipAttack, TOY_DEGREES, type AttackRun, type ToyDegree } from './lip-attack';
+import { alignedBasisModel, basisFromVectors, formatMatrix, multiply, inverse, ROTATION_3_4_5 } from './aligned-basis';
 
 type SchemeKey = 'falcon' | 'mldsa' | 'hawk';
 type ParamKey = '512' | '1024';
@@ -1194,6 +1195,80 @@ function cryptanalysisMarkup(): string {
   `;
 }
 
+/**
+ * "Related" note for Exhibit 1.5: Polar-KEM, an NGCC round-one KEM whose
+ * specified public key is an aligned orthogonal image of a recomputable basis.
+ *
+ * Every matrix below is computed by src/aligned-basis.ts from this exhibit's own
+ * two bases; scripts/verify-phase8.ts pins the properties the prose states.
+ * The 2 x 2 example is a model. The figures about Polar-KEM itself are quoted
+ * from the cited paper and nothing here runs Polar-KEM.
+ */
+function relatedPolarKemMarkup(): string {
+  const reference = basisFromVectors(LIP_SHORT_BASIS);
+  // U is the change of basis that takes this exhibit's short basis to its bad one.
+  const change = multiply(inverse(reference), basisFromVectors(LIP_BAD_BASIS));
+  const model = alignedBasisModel(reference, ROTATION_3_4_5, change);
+  const m = (value: Parameters<typeof formatMatrix>[0], hook: string): string =>
+    `<span class="mono-block related-matrix" data-related="${hook}">${escapeHtml(formatMatrix(value))}</span>`;
+  const alignedVerdict = model.alignedRecoversSecret
+    ? 'which is O exactly'
+    : 'which is NOT O (this build does not reproduce the identity)';
+  const generalVerdict = !model.generalNaiveIsOrthogonal && !model.generalNaiveRecoversSecret
+    ? 'which is not orthogonal, so it is not O'
+    : 'which unexpectedly passes (this build does not reproduce the contrast)';
+
+  return `
+    <aside class="related-panel" id="related-polar-kem" aria-labelledby="related-polar-kem-title">
+      <span class="eyebrow">Related · NGCC round one, September 2026</span>
+      <h3 id="related-polar-kem-title">Polar-KEM: a LIP-based key recovered without solving LIP</h3>
+      <p>
+        Polar-KEM is a first-round key-encapsulation candidate in NGCC, the open post-quantum competition
+        run by China's Institute of Commercial Cryptography Standards. It claims security from a lattice
+        isomorphism problem over lattices built from polar codes. Its specified key generation publishes
+        B<sub>pk</sub> = O·B<sub>red</sub>, where O is the secret orthogonal matrix and B<sub>red</sub> is a
+        reduced basis derived from public parameters by public algorithms, so anyone can recompute it. The
+        secret then follows in one step, <strong>O = B<sub>pk</sub>·B<sub>red</sub><sup>−1</sup></strong>
+        (Xiao, Chen and Zhang,
+        <a href="https://eprint.iacr.org/2026/2211" rel="noopener" target="_blank">Structural Cryptanalysis of Polar-KEM: Direct Recovery of the Secret Isometry</a>,
+        abstract and §5). The authors report exact recovery at PolarKEM-128, N = 512, with a 0.235 s linear
+        solve (§5.5, Table 3). The public tracker records it as
+        <a href="https://ngcc.dev/reports/kem-29.html" rel="noopener" target="_blank">finding kem-29-2</a>.
+      </p>
+      <p>
+        <strong>The LIP assumption was not broken.</strong> A general LIP instance is
+        B<sub>2</sub> = O·B<sub>1</sub>·U with an unknown unimodular U. Polar-KEM published the special case
+        U = I, so its public key was not a random LIP instance (§5.6). This is the line the opening paragraph
+        of this exhibit draws: relating two known bases is linear algebra.
+      </p>
+      <p data-related="worked-example">
+        <strong>Modelled at 2 × 2</strong> with this exhibit's two bases and the 3-4-5 rotation the paper
+        uses for its exact-arithmetic experiments (§5.5). Secret O = ${m(model.secret, 'secret')}. Public
+        reference basis B<sub>red</sub> = ${m(model.reference, 'reference')}, the short basis above.
+        Published B<sub>pk</sub> = O·B<sub>red</sub> = ${m(model.alignedPublic, 'aligned-public')}. Then
+        B<sub>pk</sub>·B<sub>red</sub><sup>−1</sup> = ${m(model.alignedRecovered, 'aligned-recovered')},
+        <span data-related="aligned-verdict">${alignedVerdict}</span>. Now hide the correspondence: publish
+        O·B<sub>red</sub>·U with U = ${m(model.change, 'change')}, which turns the short basis into the bad
+        basis above. The same formula returns ${m(model.generalNaive, 'general-naive')},
+        <span data-related="general-verdict">${generalVerdict}</span>. Finding that U is the problem LIP
+        actually poses.
+      </p>
+      <p class="mini-note">
+        Version and scope. The result is against the construction as specified (Polar-KEM specification,
+        Version 1.0 Draft, dated 30 April 2026; round-one package Polar-KEM.zip, SHA-256
+        <span class="mono-block">3ae9d4f1a717fb473e76447014d585cd5d14fe38728f02b1a044cc6a2d03e16d</span>),
+        under the natural executable reading of that specification, which leaves one parameter and the
+        reduction's tie-breaking unspecified. The submitted reference code does not implement that
+        construction and has a separate finding (kem-29-1). As of November 2026, NGCC is in its first
+        round; the ICCS proposal pages list Round 1 candidates only (checked 18 November 2026). Polar-KEM
+        is a candidate, not a standard, and candidates can be revised between rounds. HAWK is a different
+        case: its public key is a Gram matrix, which does not hand over a basis, and the 2026 attack above
+        needed real lattice reduction.
+      </p>
+    </aside>
+  `;
+}
+
 function downloadMarkup(): string {
   if (!state.signing) {
     return '';
@@ -1825,6 +1900,7 @@ function render(): void {
         </div>
         ${lipMarkup()}
         ${cryptanalysisMarkup()}
+        ${relatedPolarKemMarkup()}
       </section>
 
       <section class="exhibit" id="exhibit-gaussian" aria-labelledby="exhibit-two-title" aria-busy="${state.busyGaussian}">

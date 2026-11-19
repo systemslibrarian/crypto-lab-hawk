@@ -1531,6 +1531,37 @@ blockquote footer {
   background-color: color-mix(in srgb, var(--magenta) 8%, transparent);
 }
 
+.related-panel {
+  display: block;
+  margin-top: 26px;
+  padding: 22px 24px;
+  border-radius: 22px;
+  border: 1px solid color-mix(in srgb, var(--cyan) 34%, transparent);
+  border-left-width: 4px;
+  background-color: color-mix(in srgb, var(--cyan) 6%, transparent);
+}
+
+.related-panel h3 {
+  margin: 10px 0 14px;
+  font-size: 1.2rem;
+}
+
+.related-panel p {
+  margin: 0 0 14px;
+  color: var(--muted);
+  line-height: 1.65;
+  font-size: 0.94rem;
+}
+
+.related-panel p:last-child {
+  margin-bottom: 0;
+}
+
+.related-panel .related-matrix,
+.related-panel .mini-note .mono-block {
+  display: inline;
+}
+
 .cryptanalysis-panel .eyebrow {
   color: var(--magenta);
 }
