@@ -1182,6 +1182,19 @@ function cryptanalysisMarkup(): string {
           </p>
         </div>
       </div>
+      <h4 id="hawk-november-2026">20 November 2026 follow-up: faster recovery on the HAWK-256 challenge</h4>
+      <p>
+        In <a href="https://github.com/MiniMax-AI/Research/blob/main/Cryptography/HAWK/paper/main.pdf" rel="noopener" target="_blank">Improved Practical Key Recovery on HAWK</a>,
+        MiniMax reports recovering an equivalent signing key from a genuine HAWK-256 public key in
+        <strong>30.9 CPU minutes on one core</strong> (31.0 minutes elapsed). HAWK-256 was a 64-bit
+        research challenge. The reported 690× improvement counts allocated CPU core time; the elapsed
+        time improved by 7.2× compared with the July run on 96 cores.
+      </p>
+      <p>
+        The preprint gives lower heuristic cost estimates for HAWK-512 and HAWK-1024. It reports no
+        measured key recovery at either size. HAWK remains withdrawn, and the toy runner below still
+        demonstrates the July reduction.
+      </p>
       ${lipAttackMarkup()}
       <p class="mini-note">
         The runner above is this lab's own implementation of the reduction at toy size; it does not affect the
@@ -1998,6 +2011,10 @@ no transcendental functions anywhere</pre>
           <article class="timeline-alert">
             <span>29 July 2026</span>
             <p>One day later, the HAWK team withdraws the scheme on the NIST pqc-forum: doubling parameters or moving to higher-rank modules would, in their words, make HAWK uncompetitive. NIST marks it withdrawn.</p>
+          </article>
+          <article>
+            <span>20 November 2026</span>
+            <p>MiniMax reports faster key recovery on the HAWK-256 research challenge. <a href="#hawk-november-2026">Read the follow-up in Exhibit 1.5</a>.</p>
           </article>
         </div>
       </section>
