@@ -2,7 +2,7 @@
 
 ## What It Is
 
-Browser-based educational demo of HAWK, the post-quantum signature scheme by Léo Ducas, Eamonn W. Postlethwaite, Ludo N. Pulles, and Wessel van Woerden. HAWK was the last lattice-based scheme standing in NIST's Additional Digital Signatures process — advanced to Round 2 by NIST IR 8528 (October 2024) and to Round 3 by NIST IR 8610 (2026) — until its designers **withdrew it on 29 July 2026**, one day after a key-recovery attack halved its security margin. This repo covers the structural reasons HAWK was interesting: integer-only arithmetic, discrete Gaussian sampling over Z through fixed lookup tables, no accept/reject loop inside the sampler, and a cleaner constant-time story than Falcon — and then why none of that saved it.
+Browser-based educational demo of HAWK, the post-quantum signature scheme by Léo Ducas, Eamonn W. Postlethwaite, Ludo N. Pulles, and Wessel van Woerden. HAWK was the last lattice-based scheme standing in NIST's Additional Digital Signatures process — advanced to Round 2 by NIST IR 8528 (October 2024) and to Round 3 by NIST IR 8610 (2026) — until its designers **withdrew it on 29 July 2026**, one day after a key-recovery attack halved its security margin. This repo covers the structural reasons HAWK was interesting: integer-only reference signing and verification, discrete Gaussian sampling over Z through fixed lookup tables, no accept/reject loop inside the sampler, and a cleaner constant-time story than Falcon — and then why none of that saved it.
 
 > **HAWK is withdrawn.** On 28 July 2026 Straznickas and Weis published an unconditional reduction from HAWK-*n* key recovery to SVP in dimension *n*/2 + 1, dropping HAWK-512 from 2¹⁵⁰ to ≤2¹⁰⁸ gates and recovering real HAWK-256 keys end to end. On 29 July the HAWK team withdrew the scheme on the NIST pqc-forum, judging that doubling parameters or moving to higher-rank modules would leave it uncompetitive. NIST lists it as withdrawn. See [Security status](#security-status-the-july-2026-key-recovery-attack) below — and note the lab now *runs* that attack. Nothing deployed is affected; Falcon and ML-DSA are untouched.
 
@@ -10,7 +10,7 @@ This is a Vite + TypeScript + vanilla CSS educational lab that compares Falcon, 
 
 The emphasis is on HAWK's architectural differences from Falcon:
 
-- No floating-point arithmetic in the core signing path
+- The reference implementation signs and verifies with integer arithmetic. Its key generation emulates IEEE-754 binary64, and the authors’ optimized AVX2 implementation uses floating-point operations. [Implementation notes in the HAWK paper](https://eprint.iacr.org/2022/1155).
 - No accept/reject loop inside the sampler, unlike ML-DSA's outer rejection loop and Falcon's internal SamplerZ rejection (Falcon's signing restarts outside the sampler too, in two places — Falcon spec, Algorithm 10)
 - Integer-only discrete Gaussian sampling over Z with fixed tables
 - A simplified public/private basis story tied to the Lattice Isomorphism Problem
